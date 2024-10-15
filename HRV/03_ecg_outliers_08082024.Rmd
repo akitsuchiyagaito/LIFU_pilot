@@ -1,0 +1,427 @@
+---
+title: "ECG Outlier Analysis"
+author: "Daniel N. Albohn"
+date: "11/08/2017"
+output: 
+  html_document:
+    theme: cosmo
+    css: style.css
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE, error = FALSE, eval = FALSE)
+```
+
+Do it all together
+Manually adjusted active BF040 and sham BB867
+Sham AV503 V1 is not usable due to noisy data
+
+
+```{r}
+# Import the necessary functions
+source('/Users/atsuchiyagaito/Library/CloudStorage/OneDrive-LaureateInstituteforBrainResearch/010LIBR/Lab/Ongoing/FUS_pilot/HRV/R/hrv_tutorial/physio_functions.R')
+# Set the working directory
+setwd('/Users/atsuchiyagaito/Library/CloudStorage/OneDrive-LaureateInstituteforBrainResearch/010LIBR/Lab/Ongoing/FUS_pilot/HRV')
+
+# Define the function to process a single file
+outliers_ibi_revised <- function(file) {
+  path <- '/Users/atsuchiyagaito/Library/CloudStorage/OneDrive-LaureateInstituteforBrainResearch/010LIBR/Lab/Ongoing/FUS_pilot/HRV/data/active'
+  wd <- getwd()
+  setwd(path)
+  filename <- sub("\\.ibi\\.gz", "", file)
+  output_filename <- paste0(filename, "_ecg_clean.txt")
+  plot_filename <- paste0("../plots/active/", filename, "_plot.png")
+
+  # Check if the output file already exists
+  if (file.exists(output_filename)) {
+    message(paste("Skipping", file, "- output already exists."))
+    return(NULL) # Skip processing
+  }
+  
+  variable <- 'ibi'
+  #### Visually inspect IBI series for outliers ####
+  df <- read.delim(file, header = TRUE, sep = ',')
+  
+  df$x <- seq(1, length(df[,variable]))
+  
+  y <- seq(2, length(df[,variable]))
+  d <- diff(df[,variable], lag = 1, differences = 1)
+  diff <- cbind.data.frame(y,d)
+  data <- merge(df,diff, by.x = "x", by.y = "y", all.x = TRUE)
+  
+  # Flag potential outliers
+  data$V2 <- ifelse(data$d >= 300, NA,
+                    ifelse(data$d <= -300, NA, data$ibi))
+  
+  if (sum(is.na(data$V2)) >= 1){
+    # Predict values
+    data$predict <- forecast::tsclean(data$V2)
+    data$V3 <- ifelse(is.na(data$V2)==TRUE, data$predict, data$V2)
+  }
+  
+  # Plot and compare
+  data$colour <- ifelse(is.na(data$V2)==TRUE, "red", "black")
+  ## Plot 1
+  plot1 <- ggplot2::ggplot(data) +
+    ggplot2::geom_point(ggplot2::aes(y = ibi, x = x, colour = colour)) +
+    ggplot2::scale_colour_manual(values=c("black","red"), guide = "none") +
+    ggplot2::ggtitle("Raw Data")
+  ## Plot 2
+  plot2 <- ggplot2::ggplot(data) +
+    ggplot2::geom_point(ggplot2::aes(y = V3, x = x, colour = colour)) +
+    ggplot2::scale_colour_manual(values=c("black","red"), guide = "none") +
+    ggplot2::ggtitle("Outliers Interpolated")
+  ## multiplot and Save
+  if (!file.exists(plot_filename)) {
+    png(filename = plot_filename, width=1000, height=669, units="px")
+    gridExtra::grid.arrange(plot1,plot2, ncol=2, top=filename)
+    dev.off()
+  }
+  
+  # Write data and save
+  if (!file.exists(output_filename)) {
+    write.table(data$V3, file=output_filename, sep="\t", row.names=FALSE, col.names=FALSE)
+  }
+
+  # Clean up
+  setwd(wd)
+  # rm(list = ls())  # Be careful with this line, it clears all variables
+}
+
+# Get a list of all ibi.gz files in the directory without path
+ibi_files <- list.files(path = 'data/active', pattern = '\\.ibi\\.gz$', full.names = FALSE)
+
+# Apply the process_file function to each ibi file
+lapply(ibi_files, outliers_ibi_revised)
+
+
+
+```
+
+
+#This will overwrite...
+```{r}
+# Import the necessary functions
+source('/Users/atsuchiyagaito/Library/CloudStorage/OneDrive-LaureateInstituteforBrainResearch/010LIBR/Lab/Ongoing/FUS_pilot/HRV/R/hrv_tutorial/physio_functions.R')
+# Set the working directory
+setwd('/Users/atsuchiyagaito/Library/CloudStorage/OneDrive-LaureateInstituteforBrainResearch/010LIBR/Lab/Ongoing/FUS_pilot/HRV')
+
+# Define the function to process a single file
+outliers_ibi_revised <- function(file) {
+  path <- '/Users/atsuchiyagaito/Library/CloudStorage/OneDrive-LaureateInstituteforBrainResearch/010LIBR/Lab/Ongoing/FUS_pilot/HRV/data/active'
+  wd <- getwd()
+  setwd(path)
+  filename <- sub("\\.ibi\\.gz", "", file)
+  output_filename <- paste0(filename, "_ecg_clean.txt")
+  
+  # Check if the output file already exists
+  if (file.exists(output_filename)) {
+    message(paste("Skipping", file, "- output already exists."))
+    return(NULL) # Skip processing
+  }
+  
+  variable <- 'ibi'
+  #### Visually inspect IBI series for outliers ####
+  df <- read.delim(file, header = TRUE, sep = ',')
+  #ms
+  #df$ibi <- df$ibi*1000
+  
+  df$x <- seq(1, length(df[,variable]))
+  
+  y <- seq(2, length(df[,variable]))
+  d <- diff(df[,variable], lag = 1, differences = 1)
+  diff <- cbind.data.frame(y,d)
+  data <- merge(df,diff, by.x = "x", by.y = "y", all.x = TRUE)
+  
+  # Flag potential outliers
+  data$V2 <- ifelse(data$d >= 300, NA,
+                 ifelse(data$d <= -300, NA, data$ibi))
+  
+  if (sum(is.na(data$V2)) >= 1){
+    # Predict values
+    data$predict <- forecast::tsclean(data$V2)
+    data$V3 <- ifelse(is.na(data$V2)==TRUE, data$predict, data$V2)
+  }
+
+  # Plot and compare
+  data$colour <- ifelse(is.na(data$V2)==TRUE, "red", "black")
+  ## Plot 1
+  plot1 <- ggplot2::ggplot(data) +
+    ggplot2::geom_point(ggplot2::aes(y = ibi, x = x, colour = colour)) +
+    ggplot2::scale_colour_manual(values=c("black","red"), guide = "none") +
+    ggplot2::ggtitle("Raw Data")
+  ## Plot 2
+  plot2 <- ggplot2::ggplot(data) +
+    ggplot2::geom_point(ggplot2::aes(y = V3, x = x, colour = colour)) +
+    ggplot2::scale_colour_manual(values=c("black","red"), guide = "none") +
+    ggplot2::ggtitle("Outliers Interpolated")
+  ## multiplot and Save
+  png(filename = paste("../plots/active/",filename,"_plot.png",sep=""), width=1000, height=669,
+      units="px")
+  gridExtra::grid.arrange(plot1,plot2, ncol=2, top=filename)
+  dev.off()
+  # Write data and save
+  write.table(data$V3, file=paste0(filename,"_ecg_clean.txt"), 
+              sep="\t", row.names=FALSE, col.names=FALSE)
+
+  # Clean up
+  #setwd(wd)
+  #rm(list = ls())
+}
+
+# Get a list of all ibi.gz files in the directory without path
+ibi_files <- list.files(path = 'data/active', pattern = '\\.ibi\\.gz$', full.names = FALSE)
+
+# Apply the process_file function to each ibi file
+lapply(ibi_files, outliers_ibi_revised)
+```
+
+
+
+
+# Outlier analysis and graphing
+Finally, we have something from the raw data that is useable! We can take a look at
+how many outliers are present in our dataset and determine what we want to do with
+them. The easiest way to do this is to visualize the differences between the two.
+The function `outlier_ibi()` is a function I wrote to determine whether any IBI
+are > 300ms apart, and if so 1) remove them, 2) try and impute that missing point
+via a timeseries linear interpolation, and 3) plots the data before and after.
+
+
+Somehow this did not work
+```{r}
+#source('R/hrv_tutorial/physio_functions.R')
+#source('/Users/atsuchiyagaito/Documents/tutorials-master/R/hrv_tutorial/physio_functions.R')
+#source('/Users/atsuchiyagaito/Library/CloudStorage/OneDrive-LaureateInstituteforBrainResearch/Ongoing/FUS_pilot/HRV/R/hrv_tutorial/physio_functions.R')
+source('/Users/atsuchiyagaito/Library/CloudStorage/OneDrive-LaureateInstituteforBrainResearch/010LIBR/Lab/Ongoing/FUS_pilot/HRV/R/hrv_tutorial/physio_functions.R')
+setwd('/Users/atsuchiyagaito/Library/CloudStorage/OneDrive-LaureateInstituteforBrainResearch/010LIBR/Lab/Ongoing/FUS_pilot/HRV')
+
+head(read.csv('data/active/sub-AV503_ses-v3.ibi.gz'))
+
+outliers_ibi(file = 'sub-AV503_ses-v3.ibi.gz', path = '/Users/atsuchiyagaito/Library/CloudStorage/OneDrive-LaureateInstituteforBrainResearch/010LIBR/Lab/Ongoing/FUS_pilot/HRV/data/active')
+
+```
+
+
+Manual
+```{r manual plot}
+source('/Users/atsuchiyagaito/Library/CloudStorage/OneDrive-LaureateInstituteforBrainResearch/010LIBR/Lab/Ongoing/FUS_pilot/HRV/R/hrv_tutorial/physio_functions.R')
+setwd('/Users/atsuchiyagaito/Library/CloudStorage/OneDrive-LaureateInstituteforBrainResearch/010LIBR/Lab/Ongoing/FUS_pilot/HRV')
+head(read.csv('data/active/sub-BF040_ses-v1.ibi.gz'))
+
+
+#### Visually inspect IBI series for outliers ####
+#outliers_ibi <- function(file, path, variable = 'ibi'){
+  wd <- getwd()
+  path <- '/Users/atsuchiyagaito/Library/CloudStorage/OneDrive-LaureateInstituteforBrainResearch/010LIBR/Lab/Ongoing/FUS_pilot/HRV/data/active'
+  file <- 'sub-BF040_ses-v1.ibi.gz'
+  variable <- 'ibi'
+  setwd(path)
+  filename <- sub("*.ibi.gz", "", file)
+  df <- read.delim(file, header = TRUE, sep = ',')
+  #ms
+  #df$ibi <- df$ibi*1000
+  
+  df$x <- seq(1, length(df[,variable]))
+  
+  y <- seq(2, length(df[,variable]))
+  d <- diff(df[,variable], lag = 1, differences = 1)
+  diff <- cbind.data.frame(y,d)
+  data <- merge(df,diff, by.x = "x", by.y = "y", all.x = TRUE)
+  
+  sorted_data <- data[order(data$ibi), ] 
+  head(sorted_data)
+
+  # Flag potential outliers
+  data$V2 <- ifelse(data$d >= 300, NA,
+                 ifelse(data$d <= -300, NA, data$ibi))
+  
+  ##########Do this to remove other outliers after you check the plot##########
+  sorted_data <- data[order(is.na(data$V2), -data$V2),] 
+  sorted_data <- sorted_data[nrow(sorted_data):1,]
+  head(sorted_data)
+  data$V2 <- ifelse(data$ibi <= 370, NA, data$ibi)
+  sorted_data <- data[order(is.na(data$V2), -data$V2),] 
+  sorted_data <- sorted_data[nrow(sorted_data):1,]
+  head(sorted_data)
+  
+  #Combine together
+  # Flag potential outliers
+  data$V2 <- ifelse(data$d >= 300, NA,
+                 ifelse(data$d <= -300, NA, 
+                        ifelse(data$ibi <= 370, NA, data$ibi)))
+  sorted_data <- data[order(is.na(data$V2), -data$V2),] 
+  sorted_data <- sorted_data[nrow(sorted_data):1,]
+  head(sorted_data)
+  
+  # Sort data by 'd' in ascending order
+  sorted_data_d <- data[order(data$d), ]
+  # Check the first few rows of the sorted data
+  head(sorted_data_d)
+  # Sort data by 'd' in descending order
+  sorted_data_d <- data[order(data$d, decreasing = TRUE), ]
+  # Check the first few rows of the sorted data
+  head(sorted_data_d)
+  ##########Do this to remove other outliers after you check the plot##########
+               
+  if (sum(is.na(data$V2)) >= 1){
+    # Predict values
+    data$predict <- forecast::tsclean(data$V2)
+    data$V3 <- ifelse(is.na(data$V2)==TRUE, data$predict, data$V2)
+  }
+
+  # Plot and compare
+  data$colour <- ifelse(is.na(data$V2)==TRUE, "red", "black")
+  ## Plot 1
+  plot1 <- ggplot2::ggplot(data) +
+    ggplot2::geom_point(ggplot2::aes(y = ibi, x = x, colour = colour)) +
+    ggplot2::scale_colour_manual(values=c("black","red"), guide = FALSE) +
+    ggplot2::ggtitle("Raw Data")
+  ## Plot 2
+  plot2 <- ggplot2::ggplot(data) +
+    ggplot2::geom_point(ggplot2::aes(y = V3, x = x, colour = colour)) +
+    ggplot2::scale_colour_manual(values=c("black","red"), guide = FALSE) +
+    ggplot2::ggtitle("Outliers Interpolated")
+  ## multiplot and Save
+  png(filename = paste("../plots/active/",filename,"_plot.png",sep=""), width=1000, height=669,
+      units="px")
+  gridExtra::grid.arrange(plot1,plot2, ncol=2, top=filename)
+  dev.off()
+  # Write data and save
+  write.table(data$V3, file=paste0(filename,"_ecg_clean.txt"), 
+              sep="\t", row.names=FALSE, col.names=FALSE)
+  
+  # Clean up
+  #setwd(wd)
+  #rm(list = ls())
+#}
+
+
+
+
+```
+
+
+# Outlier analysis and graphing
+Finally, we have something from the raw data that is useable! We can take a look at
+how many outliers are present in our dataset and determine what we want to do with
+them. The easiest way to do this is to visualize the differences between the two.
+The function `outlier_ibi()` is a function I wrote to determine whether any IBI
+are > 300ms apart, and if so 1) remove them, 2) try and impute that missing point
+via a timeseries linear interpolation, and 3) plots the data before and after.
+
+
+Somehow this did not work
+```{r}
+#source('R/hrv_tutorial/physio_functions.R')
+#source('/Users/atsuchiyagaito/Documents/tutorials-master/R/hrv_tutorial/physio_functions.R')
+#source('/Users/atsuchiyagaito/Library/CloudStorage/OneDrive-LaureateInstituteforBrainResearch/Ongoing/FUS_pilot/HRV/R/hrv_tutorial/physio_functions.R')
+source('/Users/atsuchiyagaito/Library/CloudStorage/OneDrive-LaureateInstituteforBrainResearch/010LIBR/Lab/Ongoing/FUS_pilot/HRV/R/hrv_tutorial/physio_functions.R')
+setwd('/Users/atsuchiyagaito/Library/CloudStorage/OneDrive-LaureateInstituteforBrainResearch/010LIBR/Lab/Ongoing/FUS_pilot/HRV')
+
+head(read.csv('data/active/sub-AV503_ses-v3.ibi.gz'))
+
+outliers_ibi(file = 'sub-AV503_ses-v3.ibi.gz', path = '/Users/atsuchiyagaito/Library/CloudStorage/OneDrive-LaureateInstituteforBrainResearch/010LIBR/Lab/Ongoing/FUS_pilot/HRV/data/active')
+
+```
+
+
+Manual BB867 sham v3
+```{r manual plot}
+source('/Users/atsuchiyagaito/Library/CloudStorage/OneDrive-LaureateInstituteforBrainResearch/010LIBR/Lab/Ongoing/FUS_pilot/HRV/R/hrv_tutorial/physio_functions.R')
+setwd('/Users/atsuchiyagaito/Library/CloudStorage/OneDrive-LaureateInstituteforBrainResearch/010LIBR/Lab/Ongoing/FUS_pilot/HRV')
+head(read.csv('data/sham/sub-BB867_ses-v3.ibi.gz'))
+
+
+#### Visually inspect IBI series for outliers ####
+#outliers_ibi <- function(file, path, variable = 'ibi'){
+  wd <- getwd()
+  path <- '/Users/atsuchiyagaito/Library/CloudStorage/OneDrive-LaureateInstituteforBrainResearch/010LIBR/Lab/Ongoing/FUS_pilot/HRV/data/sham'
+  file <- 'sub-BB867_ses-v3.ibi.gz'
+  variable <- 'ibi'
+  setwd(path)
+  filename <- sub("*.ibi.gz", "", file)
+  df <- read.delim(file, header = TRUE, sep = ',')
+  #ms
+  #df$ibi <- df$ibi*1000
+  
+  df$x <- seq(1, length(df[,variable]))
+  
+  y <- seq(2, length(df[,variable]))
+  d <- diff(df[,variable], lag = 1, differences = 1)
+  diff <- cbind.data.frame(y,d)
+  data <- merge(df,diff, by.x = "x", by.y = "y", all.x = TRUE)
+  
+  sorted_data <- data[order(data$ibi), ] 
+  head(sorted_data)
+
+  # Flag potential outliers
+  data$V2 <- ifelse(data$d >= 300, NA,
+                 ifelse(data$d <= -300, NA, data$ibi))
+  
+  ##########Do this to remove other outliers after you check the plot##########
+  sorted_data <- data[order(is.na(data$V2), -data$V2),] 
+  sorted_data <- sorted_data[nrow(sorted_data):1,]
+  head(sorted_data) #ibi 377.500 
+  data$V2 <- ifelse(data$ibi <= 378, NA, data$ibi)
+  sorted_data <- data[order(is.na(data$V2), -data$V2),] 
+  sorted_data <- sorted_data[nrow(sorted_data):1,]
+  head(sorted_data)
+  
+  #Combine together
+  # Flag potential outliers
+  data$V2 <- ifelse(data$d >= 300, NA,
+                 ifelse(data$d <= -300, NA, 
+                        ifelse(data$ibi <= 378, NA, data$ibi)))
+  sorted_data <- data[order(is.na(data$V2), -data$V2),] 
+  sorted_data <- sorted_data[nrow(sorted_data):1,]
+  head(sorted_data)
+  
+  # Sort data by 'd' in ascending order
+  sorted_data_d <- data[order(data$d), ]
+  # Check the first few rows of the sorted data
+  head(sorted_data_d)
+  # Sort data by 'd' in descending order
+  sorted_data_d <- data[order(data$d, decreasing = TRUE), ]
+  # Check the first few rows of the sorted data
+  head(sorted_data_d)
+  ##########Do this to remove other outliers after you check the plot##########
+               
+  if (sum(is.na(data$V2)) >= 1){
+    # Predict values
+    data$predict <- forecast::tsclean(data$V2)
+    data$V3 <- ifelse(is.na(data$V2)==TRUE, data$predict, data$V2)
+  }
+
+  # Plot and compare
+  data$colour <- ifelse(is.na(data$V2)==TRUE, "red", "black")
+  ## Plot 1
+  plot1 <- ggplot2::ggplot(data) +
+    ggplot2::geom_point(ggplot2::aes(y = ibi, x = x, colour = colour)) +
+    ggplot2::scale_colour_manual(values=c("black","red"), guide = FALSE) +
+    ggplot2::ggtitle("Raw Data")
+  ## Plot 2
+  plot2 <- ggplot2::ggplot(data) +
+    ggplot2::geom_point(ggplot2::aes(y = V3, x = x, colour = colour)) +
+    ggplot2::scale_colour_manual(values=c("black","red"), guide = FALSE) +
+    ggplot2::ggtitle("Outliers Interpolated")
+  ## multiplot and Save
+  png(filename = paste("../plots/sham/",filename,"_plot.png",sep=""), width=1000, height=669,
+      units="px")
+  gridExtra::grid.arrange(plot1,plot2, ncol=2, top=filename)
+  dev.off()
+  # Write data and save
+  write.table(data$V3, file=paste0(filename,"_ecg_clean.txt"), 
+              sep="\t", row.names=FALSE, col.names=FALSE)
+  
+  # Clean up
+  #setwd(wd)
+  #rm(list = ls())
+#}
+
+
+
+
+```

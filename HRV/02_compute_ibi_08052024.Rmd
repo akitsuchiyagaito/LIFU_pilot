@@ -1,0 +1,224 @@
+---
+title: "Computing IBI Series"
+author: "Daniel N. Albohn"
+date: "11/08/2017"
+output: 
+  html_document:
+    theme: cosmo
+    css: style.css
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE, error = FALSE, eval = FALSE)
+```
+
+#Do it all together
+
+```{r}
+
+# Source necessary functions
+source('/Users/atsuchiyagaito/Library/CloudStorage/OneDrive-LaureateInstituteforBrainResearch/010LIBR/Lab/Ongoing/FUS_pilot/HRV/R/hrv_tutorial/physio_functions.R')
+# Fix qrs function
+qrs <- function(ecg, fs, return.fecg = FALSE, width = round(fs/10)+1, fl = 5, fh = 20, search = 10, threshold = 7, safe = 300) {
+    fecg <- as.vector(stats::filter(ecg, bpcoef(width, fs, fl, fh), circular = FALSE))
+    decg <- c(NA, diff(fecg))
+    decg[decg > 0 & !is.na(decg)] <- fecg[decg > 0 & !is.na(decg)]^2
+    decg[decg <= 0 & !is.na(decg)] <- 0
+    mean.decg <- mean(decg, na.rm = TRUE)
+    safe <- round(safe/(1000/fs))
+    search <- round(search/(1000/fs))
+    ref.col <- search + 1
+    r.fun <- function(x){ all(fecg[x[ref.col]] >= fecg[x]) & max(decg[x]) > threshold * mean.decg }
+    r <- c(rep(NA, search), apply(embed(seq(fecg), 2*search + 1), 1, r.fun), rep(NA, search))
+    r[r & !is.na(r)] <- c(safe,diff(which(r))) >= safe
+    if(return.fecg){
+        data.frame(fecg, r)
+    }else{
+        data.frame(r)
+    }
+}
+
+```
+
+
+```{r}
+
+# Load required library
+library(dplyr)
+
+# Set working directory
+setwd('/Users/atsuchiyagaito/Library/CloudStorage/OneDrive-LaureateInstituteforBrainResearch/010LIBR/Lab/Ongoing/FUS_pilot/HRV')
+
+# Get all .RDS file paths
+file_paths <- list.files('data/active', pattern = '\\.RDS$', full.names = TRUE)
+
+for (file in file_paths) {
+    # Extract file name without extension
+    name <- sub("\\.RDS$", "", basename(file))
+
+    df <- readRDS(file)
+
+    # create and write each new ecg file and event file
+    phys_file(df, c('time','ecg'), paste0('data/active/', name))
+    phys_info(name, 'data/active/', fs = 2000, origin = NA)
+}
+
+# Now, we can pass the .phys.csv file to the process and extract functions.
+
+# Get all .phys.csv file paths
+file_paths <- list.files('data/active', pattern = 'phys.csv$', full.names = TRUE)
+
+# Process and extract data
+process.ecg(in.file.list = file_paths, processing.mode = "batch")
+extract.ibi(in.file.list = file_paths, processing.mode = "batch")
+
+# Get all .RDS file paths to create trigger files
+file_paths <- list.files('data/active', pattern = '\\.RDS$', full.names = TRUE)
+for (file in file_paths){
+  name <- sub("\\.RDS$", "", basename(file))
+  #Save trigger file
+  InitTime <- c(0, 301, 381)
+  Type <- c("Pre", "Stim", "Post")
+  Duration <- c(300, 80, 300)
+  Value <- c(0,0,0)
+  episodes <- list(InitTime=InitTime,Type=Type,Duration=Duration,Value=Value)
+        
+  save(episodes, file = paste0('data/active/', name,"_trigger.RData"))
+}
+```
+
+
+#Check files
+```{r}
+# Get all .phys.csv and .ibi.gz file paths
+phys_files <- list.files('data/active', pattern = 'phys.csv$', full.names = TRUE)
+ibi_files <- list.files('data/active', pattern = 'ibi.gz$', full.names = TRUE)
+
+# Checking .phys.csv files
+for (file in phys_files) {
+    print(paste0("File: ", file))
+    print("Head of the file:")
+    print(head(read.csv(file)))
+    print("Tail of the file:")
+    print(tail(read.csv(file)))
+}
+
+# Checking .ibi.gz files
+for (file in ibi_files) {
+    print(paste0("File: ", file))
+    print("Head of the file:")
+    print(head(read.csv(file)))
+    print("Tail of the file:")
+    print(tail(read.csv(file)))
+}
+
+```
+
+
+#Check triggers
+```{r}
+# Get all .RData file paths
+trigger_files <- list.files('data/active', pattern = '.RData$', full.names = TRUE)
+
+# Checking .RData files
+for (file in trigger_files) {
+  print(paste0("File: ", file))
+  load(file)
+  if (exists("episodes")) {
+    # Check if it's a list and has expected elements
+    if (is.list(episodes) && all(c("InitTime", "Type", "Duration", "Value") %in% names(episodes))) {
+      print("Head of the file:")
+      for (field in c("InitTime", "Type", "Duration", "Value")) {
+        print(paste0(field, ": ", head(episodes[[field]])))
+      }
+      print("Tail of the file:")
+      for (field in c("InitTime", "Type", "Duration", "Value")) {
+        print(paste0(field, ": ", tail(episodes[[field]])))
+      }
+    } else {
+      print("The 'episodes' variable doesn't have the expected structure.")
+    }
+  } else {
+    print("The 'episodes' variable doesn't exist in this file.")
+  }
+  rm(list = "episodes")  # Clean up
+}
+
+```
+
+
+
+
+Do it one by one
+# Preparing file for IBI extraction
+We are going to use the `physioscripts` suite of functions to use peak signal detection
+and compute the IBI series. In order to use the built-in signal detection utilities in
+this suite of functions, each participant needs a few additional files to tell the program
+how to handle the raw data. The `phys_file()` and `phys_info()` functions helper functions
+I wrote to put the raw ECG signal into a format that the automatic R peak detection
+algorithm (from the `physioscripts` package) is expecting.
+
+```{r prep_ibi, eval = FALSE}
+source('/Users/atsuchiyagaito/Library/CloudStorage/OneDrive-LaureateInstituteforBrainResearch/010LIBR/Lab/Ongoing/FUS_pilot/HRV/R/hrv_tutorial/physio_functions.R')
+setwd('/Users/atsuchiyagaito/Library/CloudStorage/OneDrive-LaureateInstituteforBrainResearch/010LIBR/Lab/Ongoing/FUS_pilot/HRV')
+
+file <- 'data/active/sub-BB867_ses-v1.RDS'
+name <- sub("*.RDS", "", file)
+
+df <- readRDS(data, file = 'data/active/sub-BB867_ses-v1.RDS')
+
+# create and write each new ecg file and event file
+phys_file(df, c('time','ecg'), 'data/active/sub-BB867_ses-v1')
+phys_info('sub-BB867_ses-v1', 'data/active/', fs = 2000, origin = NA)
+```
+
+Now, we can pass the `.phys.csv` file to the process and extract functions.
+
+```{r}
+files <- list.files('data/active', pattern = 'phys.csv', full.names = TRUE)
+
+process.ecg(in.file.list = files, processing.mode = "interactive")
+
+extract.ibi(in.file.list = files, processing.mode = "batch")
+```
+
+Let's take a look at the ibi file that was created:
+
+```{r eval=TRUE}
+head(read.csv('data/active/sub-BB867_ses-v1.phys.csv'))
+tail(read.csv('data/active/sub-BB867_ses-v1.phys.csv'))
+head(read.csv('data/active/sub-BB867_ses-v1.ibi.gz'))
+tail(read.csv('data/active/sub-BB867_ses-v1.ibi.gz'))
+
+ibi <- read.csv('data/active/sub-BB867_ses-v1.ibi.gz')
+ibi <- dplyr::mutate(ibi, stim=dplyr::case_when(time>=0 & time<=300 ~ "Pre", 
+                                       time>300 & time<=380 ~ "On", 
+                                       #time>380 & time<=680 ~"Post", 
+                                       time>380 ~"Post",
+                                       TRUE ~ ""))
+##THIS WAY OF CALCULATING STIM FILE WAS WRONG
+# Find the first occurrence of "Pre" and "On" in the stim column
+first_pre <- which(ibi$stim == "Pre")[1]
+first_on <- which(ibi$stim == "On")[1]
+first_post <- which(ibi$stim == "Post")[1]
+# Count the number of occurrences of "Pre" and "On" in the stim column
+num_pre <- sum(ibi$stim == "Pre")
+num_on <- sum(ibi$stim == "On")
+num_post <- sum(ibi$stim == "Post")
+
+
+InitTime <- c(first_pre, first_on, first_post)
+Type <- c("Pre", "Stim", "Post")
+Duration <- c(num_pre, num_on, num_post)
+Value <- c(0,0,0)
+  
+episodes <- list(InitTime=InitTime,Type=Type,Duration=Duration,Value=Value)
+  
+save(episodes, file = paste0(name,"_trigger.RData"))
+
+```
+
+
+

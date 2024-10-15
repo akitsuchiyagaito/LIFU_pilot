@@ -1,0 +1,454 @@
+---
+title: "HRV Statistics"
+author: "Daniel N. Albohn"
+date: "11/08/2017"
+output: 
+  html_document:
+    theme: cosmo
+    css: style.css
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE, error = FALSE, eval = FALSE)
+```
+
+We finally have our cleaned IBI time series (derived from the cleaned and annotated ECG time series)!
+From here, we can use the `RHRV` package to analyze our data in a number of ways. Below, I build
+the time series and perform a frequency analysis on it. Finally, we will extract the high frequency
+signal for two of the marked points of interest.
+
+First, we load the data and create a new, blank HRV class using `CreateHRVData()`.
+This is where we will store everything as we proceed.
+
+Below, we load the trigger file we created in the previous step
+and extract the info we need to overlay on the time series so the
+program knows where we want it to derive the statistics from. We add
+the triggers using `AddEpisodes()`.
+
+
+Next, we can derive the instantaneous heart rate time series by using the cleaned IBI
+time series. This is possible because "instantaneous heart rate can be defined as the
+inverse of the time separation between two consecutive heart beats."
+
+Once everything is loaded into our `hrv.data` object, we can perform
+the frequency analysis with two commands: one to build a
+frequency analysis sub-object in our `hrv.data` object, and another
+to actual calculate the powerband. We can plot the powerband to check for
+any anomalies.
+
+
+Once we are satisfied with the frequency analysis, we can begin to chop up
+the data into parts that we will use to compare.
+
+
+# Do not overwrite the processed data
+```{r}
+library(RHRV)
+library(dplyr)
+
+# Set up some global variables
+setwd('/Users/atsuchiyagaito/Library/CloudStorage/OneDrive-LaureateInstituteforBrainResearch/010LIBR/Lab/Ongoing/FUS_pilot/HRV')
+path <- '/Users/atsuchiyagaito/Library/CloudStorage/OneDrive-LaureateInstituteforBrainResearch/010LIBR/Lab/Ongoing/FUS_pilot/HRV/data/active'
+files <- list.files(path, pattern = "*_ecg_clean.txt")
+
+# Define output CSV file
+output_csv <- "results/active_hrv_analysis_results.csv"
+
+# Initialize an empty dataframe to store results from all subjects
+combined_all <- data.frame()
+
+# Read existing results if the CSV file already exists
+if (file.exists(output_csv)) {
+  combined_all <- read.csv(output_csv)
+}
+
+# Function to extract measures
+extract_powerband <- function(data, type) {
+  splitting.data = SplitPowerBandByEpisodes(data, indexFreqAnalysis = 1, Tag = c(type))
+  ULF = log(mean(splitting.data$OutEpisodes$ULF))
+  VLF = log(mean(splitting.data$OutEpisodes$VLF))
+  LF = log(mean(splitting.data$OutEpisodes$LF))
+  HF = log(mean(splitting.data$OutEpisodes$HF))
+  LFHF = log(mean(splitting.data$OutEpisodes$LF / splitting.data$OutEpisodes$HF))
+  data.frame(Type = type, ULF, VLF, LF, HF, LFHF)
+}
+
+# Iterate over all files
+for (file in files) {
+  # Set names and environment for RHRV
+  name <- sub("\\_ecg_clean.txt$", "", file)
+  subject_nr <- strsplit(name, "_")[[1]][1]
+  session_nr <- "active"
+  
+  # Check if this file has already been processed
+  if (any(combined_all$Subject == subject_nr & combined_all$Session == session_nr)) {
+    message(paste("Skipping", file, "- already processed."))
+    next
+  }
+  
+  hrv.data = CreateHRVData()
+  hrv.data = SetVerbose(hrv.data, TRUE)
+  hrv.data = LoadBeatRR(hrv.data, RecordName = file.path(path, file), RecordPath = ".", scale = .001)
+  
+  load(file.path(path, paste0(name, "_trigger.RData"))) 
+  
+  # Add episodes in hrv.data
+  hrv.data = AddEpisodes(hrv.data, InitTimes = episodes$InitTime, 
+                         Tags = episodes$Type,
+                         Durations = episodes$Duration,
+                         Values = episodes$Value)
+  
+  hrv.data = BuildNIHR(hrv.data)
+  hrv.data = FilterNIHR(hrv.data)
+  
+  ## Save the PlotNIHR plot
+  png(filename = paste0("data/plots/active/", name, "_hr_plot.png"), width = 1000, height = 669, units = "px")
+  PlotNIHR(hrv.data, Tags = episodes$Type)
+  dev.off()
+  
+  ## Interpolate HRV
+  hrv.data = InterpolateNIHR(hrv.data, freqhr = 4)
+  
+  # Perform frequency analysis
+  hrv.data = CreateFreqAnalysis(hrv.data)
+  hrv.data = CalculatePowerBand(hrv.data, indexFreqAnalysis = 1, type = "wavelet",
+                                wavelet = "d4", bandtolerance = 0.1)
+  
+  ## Plot powerband for all files
+  png(filename = paste("data/plots/active/", name, "_powerband.png", sep = ""), width = 1000, height = 669,
+      units = "px")
+  PlotPowerBand(hrv.data, normalized = TRUE, hr = TRUE, Tags = "all")
+  dev.off()
+  
+  # Create Time Analysis
+  hrv.data = CreateTimeAnalysis(hrv.data, size = 300, interval = 7.8125)
+  
+  ## Extract the episodes
+  episodes <- hrv.data$Episodes
+  
+  ## Initialize lists to store the results
+  results <- list()
+  
+  ## Iterate over the episodes
+  for (i in 1:nrow(episodes)) {
+    # Extract the current episode
+    current_episode <- episodes[i,]
+    
+    # Calculate start and end times for each episode
+    start_time <- current_episode$InitTime
+    end_time <- start_time + current_episode$Duration
+    
+    # Create window for each episode
+    episode_data <- Window(hrv.data, start = start_time, end = end_time)
+    
+    # Filter the episode data to the current episode
+    episode_data$Episodes <- episode_data$Episodes[episode_data$Episodes$Type == current_episode$Type, ]
+    
+    # Perform the HRV analysis
+    episode_data <- CreateTimeAnalysis(episode_data, size = 300, interval = 7.8125)
+    
+    # Store the results
+    results[[current_episode$Type]] <- episode_data
+  }
+  
+  ## Prepare a list to hold data frames
+  data_frames <- list()
+  
+  ## For each result
+  for (type in names(results)) {
+    # Convert the result to a data frame
+    df <- as.data.frame(results[[type]]$TimeAnalysis)
+    
+    # Add a column to identify the episode type
+    df$Type <- type
+    
+    # Append to the list
+    data_frames[[type]] <- df
+  }
+  
+  ## Combine all data frames into one
+  combined_df <- do.call(rbind, data_frames)
+  
+  ## Add subject's name and session number
+  combined_df$Subject <- subject_nr
+  combined_df$Session <- session_nr
+  
+  ## Extract measures for each stage
+  Pre = extract_powerband(hrv.data, "Pre")
+  Stim = extract_powerband(hrv.data, "Stim")
+  Post = extract_powerband(hrv.data, "Post")
+  
+  ## Combine into a single data frame
+  powerband <- rbind(Pre, Stim, Post)
+  powerband$Subject <- subject_nr
+  powerband$Session <- session_nr
+  
+  combined_df <- merge(combined_df, powerband, by = c("Subject", "Session", "Type"))
+  
+  ## Rename the "Type" column as "Time"
+  combined_df <- rename(combined_df, Time = Type)
+  
+  ## Recode the "Stim" level as "On"
+  combined_df$Time <- dplyr::recode(combined_df$Time, "Stim" = "On")
+  
+  ## Change the order of the levels
+  combined_df$Time <- factor(combined_df$Time, levels = c("Pre", "On", "Post"))
+  
+  ## Sort the dataframe by the Time factor
+  combined_df <- combined_df[order(combined_df$Time),]
+  
+  # Append the results to the combined dataframe
+  combined_all <- rbind(combined_all, combined_df)
+}
+
+# Write the combined dataframe to a CSV file
+write.csv(combined_all, output_csv, row.names = FALSE)
+
+# Check the dataframe
+head(read.csv(output_csv))
+
+
+
+```
+
+
+# This will overwrite
+```{r}
+library(RHRV)
+library(dplyr)
+
+# Set up some global variables
+setwd('/Users/atsuchiyagaito/Library/CloudStorage/OneDrive-LaureateInstituteforBrainResearch/010LIBR/Lab/Ongoing/FUS_pilot/HRV')
+path <- '/Users/atsuchiyagaito/Library/CloudStorage/OneDrive-LaureateInstituteforBrainResearch/010LIBR/Lab/Ongoing/FUS_pilot/HRV/data/active'
+files <- list.files(path, pattern = "*_ecg_clean.txt")
+
+# Initialize an empty dataframe to store results from all subjects
+combined_all <- data.frame()
+
+# Set up function to shop up the power band
+  ## Function to extract measures, be aware that only frequency analysis results are log transformed!
+  extract_powerband <- function(data, type) {
+    splitting.data = SplitPowerBandByEpisodes(data, indexFreqAnalysis = 1, Tag = c(type))
+    ULF = log(mean(splitting.data$OutEpisodes$ULF))
+    VLF = log(mean(splitting.data$OutEpisodes$VLF))
+    LF = log(mean(splitting.data$OutEpisodes$LF))
+    HF = log(mean(splitting.data$OutEpisodes$HF))
+    LFHF = log(mean(splitting.data$OutEpisodes$LF/splitting.data$OutEpisodes$HF))
+    #LFHF = log(mean(splitting.data$OutEpisodes$LFHF))
+    data.frame(Type = type, ULF, VLF, LF, HF, LFHF)
+  }
+  
+#    extract_powerband <- function(data, type) {
+#    splitting.data = SplitPowerBandByEpisodes(data, indexFreqAnalysis = 1, Tag = c(type))
+#    ULF = mean(splitting.data$OutEpisodes$ULF)
+#    VLF = mean(splitting.data$OutEpisodes$VLF)
+#    LF = mean(splitting.data$OutEpisodes$LF)
+#    HF = mean(splitting.data$OutEpisodes$HF)
+#    LFHF = mean(splitting.data$OutEpisodes$LF/splitting.data$OutEpisodes$HF)
+#    #LFHF = log(mean(splitting.data$OutEpisodes$LFHF))
+#    data.frame(Type = type, ULF, VLF, LF, HF, LFHF)
+#  }
+  
+  
+
+# Iterate over all files
+for (file in files) {
+  # Set names and environment for RHRV
+  #name <- sub("\\_ecg_clean.txt$", "", file)
+  name <- sub("*_ecg_clean.txt", "", file)
+  hrv.data = CreateHRVData()
+  hrv.data = SetVerbose(hrv.data, TRUE)
+  hrv.data = LoadBeatRR(hrv.data, RecordName=file.path(path,file), RecordPath=".", scale = .001)
+  #file_ev <- sub("*_ecg_clean.txt", "", file)
+  #file <- 'sub-AV503_ses-v3.RDS'
+  load(file.path(path,paste0(name,"_trigger.RData"))) 
+  
+  # Add episodes in hrv.data
+  hrv.data = AddEpisodes(hrv.data, InitTimes = episodes$InitTime, 
+                       Tags = episodes$Type,
+                       Durations = episodes$Duration,
+                       Values = episodes$Value)
+  
+  # Instantaneous heart rate can be defined as the inverse of the time separation between two consecutive heart beats
+  hrv.data = BuildNIHR(hrv.data)
+  hrv.data = FilterNIHR(hrv.data)
+  
+  ## Save the PlotNIHR plot
+  png(filename = paste0("data/plots/active/", name, "_hr_plot.png"), width = 1000, height = 669, units = "px")
+  PlotNIHR(hrv.data, Tags = episodes$Type)
+  dev.off()
+  
+  ## Interporate HRV
+  hrv.data = InterpolateNIHR(hrv.data, freqhr = 4)
+    
+  
+  #Perform frequency analysis
+  ## Calculating spectrogram and power per band using wavelet analysis:
+  hrv.data = CreateFreqAnalysis(hrv.data)
+  hrv.data = CalculatePowerBand(hrv.data, indexFreqAnalysis = 1, type="wavelet",
+                                wavelet="d4", bandtolerance=0.1)
+  
+  ## Plot powerband for all files
+  png(filename = paste("data/plots/active/",name,"_powerband.png",sep=""), width=1000, height=669,
+       units="px")
+  PlotPowerBand(hrv.data, normalized = TRUE, hr = TRUE, Tags = "all")
+  #PlotPowerBand(hrv.data, normalized = TRUE, hr = TRUE, Tag = episodes$Type)
+  dev.off()
+  
+  # Create Time Analysis
+  hrv.data = CreateTimeAnalysis(hrv.data,size=300,interval = 7.8125)
+  
+  ## Extract the episodes
+  episodes <- hrv.data$Episodes
+  
+  ## Initialize lists to store the results
+  results <- list()
+  
+  ## Iterate over the episodes
+  for (i in 1:nrow(episodes)) {
+    # Extract the current episode
+    current_episode <- episodes[i,]
+    
+    # Calculate start and end times for each episode
+    start_time <- current_episode$InitTime
+    end_time <- start_time + current_episode$Duration
+    
+    # Create window for each episode
+    episode_data <- Window(hrv.data, start = start_time, end = end_time)
+    
+    # Filter the episode data to the current episode
+    episode_data$Episodes <- episode_data$Episodes[episode_data$Episodes$Type == current_episode$Type, ]
+    
+    # Perform the HRV analysis
+    episode_data <- CreateTimeAnalysis(episode_data, size = 300, interval = 7.8125) #128Hz (1/128=7.8125) Size is the window size and interval is the time points of sliding window. since the episode duration is 300 80 300, interval really does not matter, and it creates only one value
+    
+    # Store the results
+    results[[current_episode$Type]] <- episode_data
+  }
+  
+  ## Prepare a list to hold data frames
+  data_frames <- list()
+  
+  ## For each result
+  for(name in names(results)) {
+    # Convert the result to a data frame
+    df <- as.data.frame(results[[name]]$TimeAnalysis)
+    
+    # Add a column to identify the episode type
+    df$Type <- name
+    
+    # Append to the list
+    data_frames[[name]] <- df
+  }
+  
+  ## Combine all data frames into one
+  combined_df <- do.call(rbind, data_frames)
+  
+  ## Add subject's name and session number
+  file_info <- strsplit(file, "_")[[1]]
+  subject_nr <- file_info[1]
+  #session_nr <- gsub("\\.RDS$", "", file_info[2])
+  sesstion_nr <- "active"
+  
+  combined_df$Subject <- subject_nr
+  combined_df$Session <- sesstion_nr
+  
+  ## Extract measures for each stage
+  Pre = extract_powerband(hrv.data, "Pre")
+  Stim = extract_powerband(hrv.data, "Stim")
+  Post = extract_powerband(hrv.data, "Post")
+  
+  ## Combine into a single data frame
+  powerband <- rbind(Pre, Stim, Post)
+  powerband$Subject <- subject_nr
+  powerband$Session <- sesstion_nr
+  
+  combined_df <- merge(combined_df, powerband, by = c("Subject", "Session", "Type"))
+  
+  ## Rename the "Type" column as "Time"
+  combined_df <- rename(combined_df, Time = Type)
+  ## Recode the "Stim" level as "On"
+  combined_df$Time <- dplyr::recode(combined_df$Time, "Stim" = "On")
+  
+  ## Change the order of the levels
+  combined_df$Time <- factor(combined_df$Time, levels = c("Pre", "On", "Post"))
+  
+  ## Sort the dataframe by the Time factor
+  combined_df <- combined_df[order(combined_df$Time),]
+  
+  ## Check the dataframe
+  print(combined_df)
+ 
+  # Append the results to the combined dataframe
+  combined_all <- rbind(combined_all, combined_df)
+}
+
+# Write the combined dataframe to a CSV file
+write.csv(combined_all, "results/active_hrv_analysis_results.csv", row.names = FALSE)
+#write.csv(combined_all, "results/logtransformed/log_active_hrv_analysis_results.csv", row.names = FALSE)
+# Check the dataframe
+#head(read.csv('results/logtransformed/log_active_hrv_analysis_results.csv'))
+head(read.csv('results/active_hrv_analysis_results.csv'))
+
+```
+
+
+Check normality
+```{r}
+
+numeric_columns <- combined_all[, c( 'SDNN',  'pNN50', 'SDSD', 'rMSSD', 'IRRR', 'MADRR', 'TINN', 'HRVi', 'ULF', 'VLF', 'LF', 'HF', 'LFHF')]
+
+
+check_normality <- function(df) {
+  results <- list()
+  
+  for (col_name in names(df)) {
+    col_data <- df[[col_name]]
+    
+    # Skip if column is not numeric
+    if (!is.numeric(col_data)) {
+      next
+    }
+    
+    # Skip if all values are identical
+    if (length(unique(col_data)) == 1) {
+      next
+    }
+    
+    # Perform the test and store the results
+    results[[col_name]] <- shapiro.test(col_data)
+  }
+  
+  return(results)
+}
+
+# Use the function on your dataframe
+normality_results <- check_normality(numeric_columns)
+
+# Print the results
+normality_results
+
+#QQ plot
+par(mar = c(5, 4, 4, 2) + 0.1) #default
+par(mfrow = c(4, 4), mar = c(2, 2, 2, 2)) 
+
+lapply(names(numeric_columns), function(column_name) {
+  column <- numeric_columns[[column_name]]
+  qqnorm(column, main = "")
+  qqline(column)  # Optional: adds a line to the plot to help visualize deviation from normality
+  title(main = column_name, line = -1)
+})
+
+# Hist
+par(mfrow = c(4, 4), mar = c(2, 2, 2, 2))  # Adjust the values to fit the number of numeric columns
+
+lapply(names(numeric_columns), function(column_name) {
+  column <- numeric_columns[[column_name]]
+  hist(column, main = "", xlab = column_name)
+  title(main = column_name, line = -1)
+})
+
+
+```

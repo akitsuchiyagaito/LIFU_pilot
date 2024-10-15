@@ -1,0 +1,690 @@
+---
+title: "LME_hrv"
+output: html_document
+date: "2023-07-18"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+
+#All data
+
+```{r}
+library(tidyverse)
+library(ggplot2)
+library(lme4)
+library(lmerTest)
+library(lsmeans)
+library(phia)
+library(psych)
+library(broom)
+
+# Read the list.txt file to get subject-session mapping
+session_data <- read.csv('./list.txt', header = FALSE, stringsAsFactors = FALSE)
+names(session_data) <- c("Subject", "Active", "Sham")
+
+# Read the HRV results data
+dat <- read.csv("results/hrv_analysis_results.csv")
+dat$Session <- factor(dat$Session, levels = c("active", "sham"))
+dat$Time <- factor(dat$Time, levels = c("Pre", "On", "Post"))
+
+# Remove sub-AV503 sham due to the noisy data
+dat <- subset(dat, !(Subject == "sub-AV503" & Session == "sham"))
+
+# Remove sub-BU206 active and sham due to the noisy data
+dat <- subset(dat, !(Subject == "sub-BU206" & Session == "active"))
+dat <- subset(dat, !(Subject == "sub-BU206" & Session == "sham"))
+
+# Define the columns to iterate over
+vars <- c("pNN50", "SDSD", "rMSSD", "IRRR", "MADRR", "TINN", "HRVi", "ULF", "VLF", "LF", "HF", "LFHF")
+
+# Define the function to apply
+fit_model <- function(var) {
+  print(paste("Processing variable:", var))
+  fm <- lmer(as.formula(paste(var, "~ Session * Time + (1 | Subject)")), data = dat, REML = TRUE)
+  print(paste("ANOVA results for:", var))
+  print(anova(fm))
+  print(paste("Summary results for:", var))
+  print(summary(fm))
+  
+  # AdjM
+  fm.AdjM <- interactionMeans(fm)
+  print(fm.AdjM)
+
+  # 95% confidence
+  fm.95ci <- confint(fm, method = "Wald")
+  print(fm.95ci)
+
+  # lsmeans
+  print(lsmeans(fm, pairwise ~ Session | Time))
+  print(lsmeans(fm, pairwise ~ Time | Session))
+  print(summary(contrast(lsmeans(fm, ~ Time | Session), by = NULL)))
+}
+
+# Use lapply to loop over the columns and apply the function
+models <- lapply(vars, fit_model)
+
+# Fitted model example for one variable
+fm <- lmer(HRVi ~ Session * Time + (1 | Subject), data = dat, REML = TRUE)
+anova(fm)
+summary(fm)
+
+# AdjM
+fm.AdjM <- interactionMeans(fm)
+print(fm.AdjM)
+
+# 95% confidence
+fm.95ci <- confint(fm, method = "Wald")
+print(fm.95ci)
+
+# lsmeans
+print(lsmeans(fm, pairwise ~ Session | Time))
+print(lsmeans(fm, pairwise ~ Time | Session))
+print(summary(contrast(lsmeans(fm, ~ Time | Session), by = NULL)))
+
+
+
+```
+
+
+
+#preliminary data for R01
+```{r}
+library(tidyverse)
+library(ggplot2)
+library(lme4)
+library(lmerTest)
+library(lsmeans)
+library(phia)
+library(psych)
+library(broom)
+
+# Create a new dataframe with Subjects and their respective Groups
+group_data <- data.frame(Subject = c("AV503", "AX394", "BB867", "BE596", "BC027", 
+                                     "BF040", "BC726", "BN460", "BE672", "AW090", 
+                                     "BR780", "BT118", "BB898"),
+                         Group = c("HC", "Low", "Low", "High", "High", "High", 
+                                   "High", "Low", "High", "HC", "High", "Low", "HC"))
+# Add prefix "sub-" to 'Subject' column
+group_data$Subject <- paste0("sub-", group_data$Subject)
+
+dat <- read.csv("results/hrv_analysis_results.csv")
+dat$Session <- factor(dat$Session, levels = c("active", "sham"))
+dat$Time <- factor(dat$Time, levels = c("Pre", "On", "Post"))
+
+# Merge the new dataframe with the existing one
+dat <- merge(dat, group_data, by = "Subject")
+
+# remove sub-AV503 sham due to the noisy data
+dat <- subset(dat, !(Subject == "sub-AV503" & Session == "sham"))
+
+# narrow down MDD data
+# Use only "Low" and "High" groups
+dat <- subset(dat, Group %in% c("Low", "High"))
+
+#dat <- subset(dat, Time %in% c("Pre", "Post"))
+
+# Define the columns to iterate over
+#vars <- c( "SDNN",  "SDNNIDX", "pNN50",   "SDSD" ,   "rMSSD",   "IRRR",    "MADRR" , "TINN"  ,  "HRVi" ,   "ULF" ,    "VLF" ,    "LF" ,     "HF" ,     "LFHF")
+
+#vars <- c( "ULF" ,    "VLF" ,    "LF" ,     "HF" ,     "LFHF")
+vars <- c( "pNN50",   "SDSD" ,   "rMSSD",   "IRRR",    "MADRR" , "TINN"  ,  "HRVi",  "ULF" ,    "VLF" ,    "LF" ,     "HF" ,     "LFHF")
+
+# Define the function to apply
+fit_model <- function(var) {
+    print(paste("Processing variable:", var))
+    fm <- lmer(as.formula(paste(var, "~ Session * Time + (1 | Subject)")), data = dat, REML = TRUE)
+    print(paste("ANOVA results for:", var))
+    print(anova(fm))
+    print(paste("Summary results for:", var))
+    print(summary(fm))
+  
+    #AdjM
+    fm.AdjM <- interactionMeans(fm)
+    print(fm.AdjM)
+
+    #95% confidence
+    fm.95ci <- confint(fm, method = "Wald")
+    print(fm.95ci)
+
+    #lsmeans
+    print(lsmeans (fm, pairwise ~ Session | Time))
+    print(lsmeans (fm, pairwise ~ Time | Session))
+    print(summary(contrast(lsmeans(fm, ~ Time | Session), by=NULL)))
+}
+
+# Use lapply to loop over the columns and apply the function
+models <- lapply(vars, fit_model)
+
+
+
+
+
+
+#fitted model
+fm <- lmer(HRVi~Session*Time+(1|Subject), data=dat, REML=TRUE)
+anova(fm)
+summary(fm)
+
+#AdjM
+fm.AdjM <- interactionMeans(fm)
+print(fm.AdjM)
+
+#95% confidence
+fm.95ci <- confint(fm, method = "Wald")
+fm.95ci
+
+#lsmeans
+lsmeans (fm, pairwise~Session|Time)
+lsmeans (fm, pairwise~Time|Session)
+summary(contrast(lsmeans(fm, ~Time|Session), by=NULL))
+```
+
+# Looping
+
+```{r}
+library(tidyverse)
+library(ggplot2)
+library(lme4)
+library(lmerTest)
+library(lsmeans)
+library(phia)
+library(psych)
+library(broom)
+library(openxlsx)
+
+# Read demo.csv to get the subject and group data
+demo_data <- read.csv('./demo.csv', stringsAsFactors = FALSE)
+
+# Ensure that the subject column is correctly formatted, e.g., with "sub-" prefix if necessary
+demo_data$Subject <- demo_data$SID
+
+# Read the HRV results data
+dat <- read.csv("results/hrv_analysis_results.csv")
+dat$Session <- factor(dat$Session, levels = c("active", "sham"))
+dat$Time <- factor(dat$Time, levels = c("Pre", "On", "Post"))
+
+# Merge the demo data with the existing HRV data
+dat <- merge(dat, demo_data, by = "Subject")
+
+# Remove sub-AV503 sham due to the noisy data
+dat <- subset(dat, !(Subject == "sub-AV503" & Session == "sham"))
+
+# Remove sub-BU206 active and sham due to the noisy data
+dat <- subset(dat, !(Subject == "sub-BU206" & Session == "active"))
+dat <- subset(dat, !(Subject == "sub-BU206" & Session == "sham"))
+
+# Narrow down MDD data to only "Low" and "High" groups
+dat <- subset(dat, Group %in% c("Low", "High"))
+
+# Only use "Pre" and "Post" times for analysis
+#dat <- subset(dat, Time %in% c("Pre", "Post"))
+
+# Define the columns to iterate over
+vars <- c("pNN50", "SDSD", "rMSSD", "IRRR", "MADRR", "TINN", "HRVi", "ULF", "VLF", "LF", "HF", "LFHF")
+
+# Define the function to apply
+fit_model <- function(var) {
+  print(paste("Processing variable:", var))
+  fm <- lmer(as.formula(paste(var, "~ Session * Time + (1 | Subject)")), data = dat, REML = TRUE)
+  print(paste("ANOVA results for:", var))
+  print(anova(fm))
+  print(paste("Summary results for:", var))
+  print(summary(fm))
+  
+  # AdjM
+  fm.AdjM <- interactionMeans(fm)
+  print(fm.AdjM)
+
+  # 95% confidence
+  fm.95ci <- confint(fm, method = "Wald")
+  print(fm.95ci)
+
+  # lsmeans
+  print(lsmeans(fm, pairwise ~ Session | Time))
+  print(lsmeans(fm, pairwise ~ Time | Session))
+  print(summary(contrast(lsmeans(fm, ~ Time | Session), by = NULL)))
+}
+
+# Use lapply to loop over the columns and apply the function
+models <- lapply(vars, fit_model)
+
+# Fitted model example for one variable
+#fm <- lmer(HRVi ~ Session * Time + (1 | Subject), data = dat, REML = TRUE)
+#anova(fm)
+#summary(fm)
+
+# AdjM
+#fm.AdjM <- interactionMeans(fm)
+#print(fm.AdjM)
+
+# 95% confidence
+#fm.95ci <- confint(fm, method = "Wald")
+#print(fm.95ci)
+
+# lsmeans
+#print(lsmeans(fm, pairwise ~ Session | Time))
+#print(lsmeans(fm, pairwise ~ Time | Session))
+#print(summary(contrast(lsmeans(fm, ~ Time | Session), by = NULL)))
+
+
+
+```
+
+
+# For R01 preliminary data
+```{r}
+
+library(tidyverse)
+library(ggplot2)
+library(lme4)
+library(lmerTest)
+library(lsmeans)
+library(phia)
+library(psych)
+library(broom)
+library(openxlsx)
+
+
+# Create a new dataframe with Subjects and their respective Groups
+group_data <- data.frame(Subject = c("AV503", "AX394", "BB867", "BE596", "BC027", 
+                                     "BF040", "BC726", "BN460", "BE672", "AW090", 
+                                     "BR780", "BT118", "BB898"),
+                         Group = c("HC", "Low", "Low", "High", "High", "High", 
+                                   "High", "Low", "High", "HC", "High", "Low", "HC"))
+# Add prefix "sub-" to 'Subject' column
+group_data$Subject <- paste0("sub-", group_data$Subject)
+
+dat <- read.csv("results/hrv_analysis_results.csv")
+dat$Session <- factor(dat$Session, levels = c("active", "sham"))
+dat$Time <- factor(dat$Time, levels = c("Pre", "On", "Post"))
+
+# Merge the new dataframe with the existing one
+dat <- merge(dat, group_data, by = "Subject")
+
+# remove sub-AV503 sham due to the noisy data
+dat <- subset(dat, !(Subject == "sub-AV503" & Session == "sham"))
+
+# narrow down MDD data
+# Use only "Low" and "High" groups
+dat <- subset(dat, Group %in% c("Low", "High"))
+
+dat <- subset(dat, Time %in% c("Pre", "Post"))
+
+
+```
+
+
+# Save the results
+```{r}
+fit_model <- function(i, dat) {
+  print(paste("Processing variable:", i))
+  
+  # Model fitting
+  fm <- lmer(as.formula(paste(i, "~ Session * Time + (1 | Subject)")), data = dat, REML = TRUE)
+  
+  # Anova results
+  anova_res <- anova(fm)
+  anova_res$Variable <- i
+  anova_res_df <- data.frame(Variable = anova_res$Variable, 
+                             Condition = c("Session","Time","Session:Time"),
+                             NumDF = anova_res$"NumDF",
+                             DenDF = anova_res$"DenDF",
+                             F_value = anova_res$"F value", 
+                             p_value_F = anova_res$"Pr(>F)")
+  
+  # Model summary
+  summary_res <- summary(fm)
+  
+  # Fixed effects table
+  fe <- summary_res$coefficients
+  fe <- data.frame(fe)
+  fe$Variable <- rep(i, nrow(fe))
+  # Only keep rows where the row name is not "(Intercept)"
+  fe_df <- fe[!rownames(fe) == "(Intercept)", ]
+  # Move fixed effects table to result dataframe
+  fe_df <- data.frame(Variable = fe_df$Variable,
+                      #Condition = c("Intercept","Session","Time","Session:Time"),
+                      #Condition = c("Session","Time","Session:Time"),
+                      Condition = rownames(fe_df),
+                      LME_Estimate = fe_df[,"Estimate"],
+                      StdError = fe_df[,"Std..Error"],
+                      df = fe_df[,"df"],
+                      t_value = fe_df[, "t.value"],
+                      p_value = fe_df[,"Pr...t.."])
+
+  
+  # Combine Anova results and fixed effects table
+  #result_df <- merge(x = anova_res_df, y = fe_df, by = c("Variable", "Condition"), all.x = TRUE)
+  #result_df <- dplyr::left_join(anova_res_df, fe_df, by = c("Variable"))
+  
+
+
+  # lsmeans
+  #lsmeans_res1 <- summary(lsmeans(fm, ~ Time | Session, contrasts = list(Session = "contr.sum", Time = "contr.sum")))
+  #lsmeans_res2 <- summary(lsmeans(fm, ~ Session | Time, contrasts = list(Session = "contr.sum", Time = "contr.sum")))
+  lsmeans_res1 <- lsmeans(fm, pairwise ~ Time | Session, contrasts = list(Session = "contr.sum", Time = "contr.sum"))
+  lsmeans_res2 <- lsmeans(fm, pairwise ~ Session | Time, contrasts = list(Time = "contr.sum", Session = "contr.sum"))
+  #lsmeans_summary <- summary(contrast(lsmeans(fm, ~Time|Session), by=NULL))
+  
+  lsmeans_res_lsmeans <- rbind(lsmeans_res1$lsmeans,lsmeans_res2$lsmeans)
+  lsmeans_res_contrast <- rbind(lsmeans_res1$contrasts,lsmeans_res2$contrasts)
+  lsmeans_res <- rbind(lsmeans_res_lsmeans, lsmeans_res_contrast)
+  #write.csv(lsmeans_res, paste0(i, "_lsmeans.csv"), row.names = FALSE)
+  lsmeans_res_df <- data.frame(lsmeans_res)
+  lsmeans_res_df$Variable <- rep(i, nrow(lsmeans_res_df))
+  
+  # Return the result
+  return(list(anova = anova_res_df, fixed_effects = fe_df, lsmeans = lsmeans_res_df))
+}
+
+# List of variables to fit models for
+vars <- c("pNN50", "SDSD", "rMSSD", "IRRR", "MADRR", "TINN", "HRVi", "ULF", "VLF", "LF", "HF", "LFHF")
+
+# Use lapply to loop over the columns and apply the function
+#results <- do.call(rbind, lapply(vars, fit_model, dat = dat))
+results <- lapply(vars, fit_model, dat = dat)
+
+anova_results <- do.call(rbind, lapply(vars, function(v) fit_model(v, dat)$anova))
+fe_results <- do.call(rbind, lapply(vars, function(v) fit_model(v, dat)$fixed_effects))
+lsmeans_results <- do.call(rbind, lapply(vars, function(v) fit_model(v, dat)$lsmeans))
+
+
+
+# function to change factor levels
+change_levels <- function(df) {
+  #df$Condition <- factor(df$Condition, levels = c("Session", "Time", "Session:Time"))
+  df$Variable <- factor(df$Variable, levels = c("pNN50", "SDSD", "rMSSD", "IRRR", "MADRR", "TINN", "HRVi", "ULF", "VLF", "LF", "HF", "LFHF"))
+  return(df)
+}
+
+# apply the function to each result
+anova_results <- change_levels(anova_results)
+fe_results <- change_levels(fe_results)
+lsmeans_results <- change_levels(lsmeans_results)
+
+# Create a new workbook
+#wb <- createWorkbook()
+
+# Add two worksheets
+#addWorksheet(wb, "Sheet1")
+#addWorksheet(wb, "Sheet2")
+#addWorksheet(wb, "Sheet3")
+  
+# Write data frames to the worksheets
+#writeData(wb, "Sheet1", anova_results)
+#writeData(wb, "Sheet2", fe_results)
+#writeData(wb, "Sheet3", lsmeans_results)
+  
+# Save the workbook to a file
+#saveWorkbook(wb, "results/results_summary.xlsx", overwrite = TRUE)
+
+
+
+  
+
+
+```
+
+#Cohen's d
+```{r}
+#Sham
+# Given values
+t_value <- -2.55
+n <- 10
+
+# Calculate Cohen's d
+cohens_d <- t_value / sqrt(n)
+print(cohens_d)
+
+#Active
+# Given values
+t_value <- 0.36
+n <- 10
+
+# Calculate Cohen's d
+cohens_d <- t_value / sqrt(n)
+print(cohens_d)
+
+```
+
+
+
+# Fig
+```{r}
+library(tidyverse)
+library(ggplot2)
+library(lme4)
+library(lmerTest)
+library(lsmeans)
+library(phia)
+library(psych)
+library(broom)
+
+i <- "LFHF"
+fit_model_for_fig <- function(var, data) {
+    fm <- lmer(as.formula(paste(var, "~ Session * Time + (1 | Subject)")), data = data, REML = TRUE)
+    print(paste("Variable:", var))
+    print(anova(fm))
+    print(summary(fm))
+  
+    #AdjM
+    fm.AdjM <- interactionMeans(fm)
+    print(fm.AdjM)
+
+    #95% confidence
+    fm.95ci <- confint(fm, method = "Wald")
+    print(fm.95ci)
+
+    #lsmeans
+    lsmeans (fm, pairwise ~ Session | Time)
+    lsmeans (fm, pairwise ~ Time | Session)
+    summary(contrast(lsmeans(fm, ~ Time | Session), by=NULL))
+    
+    # Return the model and AdjM
+    return(list("fm" = fm, "fm.AdjM" = fm.AdjM))
+}
+
+# call function and assign the result to 'fm' and 'fm.AdjM'
+result <- fit_model_for_fig(i, dat)
+fm <- result$fm
+fm.AdjM <- result$fm.AdjM
+
+
+
+
+fm.AdjM %>%
+dplyr::rename(adjMean = 'adjusted mean', se = 'SE of link') %>%
+ggplot(aes(x = Time, y = adjMean, group = Session))+
+  theme_classic(base_size = 12, base_family = "")+
+  #theme_minimal()+theme(panel.grid=element_blank())+
+  geom_line(aes(linetype = Session, color = Session), alpha = 1.0, position = position_dodge(0.2), size = 0.5)+
+  scale_linetype_manual(values=c("solid", "longdash"), labels = c("Active","Sham"))+
+  #geom_errorbar(aes(ymin = adjMean-1.96*se, ymax = adjMean+1.96*se, color = Session), 
+  geom_errorbar(aes(ymin = adjMean-se, ymax = adjMean+se, color = Session), 
+                alpha = 0.8, size = 0.5, position = position_dodge(0.2), width = 0.1)+
+  geom_point(aes(shape = Session, color = Session, fill = Session), size = 4, position = position_dodge(0.2))+
+  scale_shape_manual(values=c(21,22), labels = c("Active","Sham"))+
+  scale_color_manual(values = c("#000000",  "#000000"), labels = c("Active","Sham"))+
+  scale_fill_manual(values = c("darkgreen",  "orange"), labels = c("Active","Sham"))+
+  theme(legend.text = element_text(size=12), legend.title = element_text(size=14), 
+        axis.title.x = element_text(size=14), axis.title.y = element_text(vjust = 0.5,angle=90,size=14),
+        axis.text.x = element_text(size=12,colour="black"), axis.text.y = element_text(size=12,colour="black"), 
+        axis.ticks.x = element_line(size = 0), axis.line = element_line(size = 0.5, linetype = "solid"))+
+    labs(x = "", y = "LF/HF", title = "")+
+    labs(linetype = "")+labs(shape = "")+labs(color = "")+labs(fill = "") ->p0
+p0
+#ggsave("logLFHF.png", width = 6, height = 6 / 1.618)
+
+
+library(paletteer)
+
+#delete column of NA
+datomit <- subset(dat, !(is.na(dat[[i]])))
+
+
+pd <- position_dodge(0.1)
+
+#Active
+dat_omit_active <- filter(datomit, Session=="active")
+X <- dat_omit_active[,i]
+df<-data.frame(X, Time=dat_omit_active$Time, Subject=dat_omit_active$Subject)
+p1<- ggplot(df, aes(x=Time,y=X)) +
+  geom_boxplot(aes(fill=Time),outlier.shape = NA,alpha=0.6) +
+  geom_line(aes(group=Subject), position = pd) +
+  geom_point(aes(fill=Time,group=Subject),size=2,shape=21, position = pd) +
+  #facet_grid(~Session,scales = "free") +
+  scale_fill_paletteer_d("cartography::green.pal", direction=1, dynamic=5)+
+  theme_classic(base_size = 12, base_family = "")+
+  theme(legend.text = element_text(size=12), legend.title = element_text(size=14), 
+        axis.title.x = element_text(size=14), axis.title.y = element_text(vjust = 0.5,angle=90,size=14),
+        axis.text.x = element_text(size=12,colour="black"), axis.text.y = element_text(size=12,colour="black"), 
+        axis.ticks.x = element_line(size = 0), axis.line = element_line(size = 0.5, linetype = "solid"))+
+  scale_y_continuous(limits = c(0,7), labels = scales::number_format(accuracy = 0.1))+
+  labs(x = "", y = "LF/HF", title = "Active")+
+  theme(plot.title = element_text(hjust = 0.5), legend.position = "none")
+
+#Sham
+dat_omit_sham <- filter(datomit, Session=="sham")
+X <- dat_omit_sham[,i]
+df<-data.frame(X, Time=dat_omit_sham$Time, Subject=dat_omit_sham$Subject)
+p2<- ggplot(df, aes(x=Time,y=X)) +
+  geom_boxplot(aes(fill=Time),outlier.shape = NA,alpha=0.6) +
+  geom_line(aes(group=Subject), position = pd) +
+  geom_point(aes(fill=Time,group=Subject),size=2,shape=21, position = pd) +
+  #facet_grid(~Session,scales = "free") +
+  scale_fill_paletteer_d("cartography::orange.pal", direction=1, dynamic=5)+
+  theme_classic(base_size = 12, base_family = "")+
+  theme(legend.text = element_text(size=12), legend.title = element_text(size=14), 
+        axis.title.x = element_text(size=14), axis.title.y = element_text(vjust = 0.5,angle=90,size=14),
+        axis.text.x = element_text(size=12,colour="black"), axis.text.y = element_text(size=12,colour="black"), 
+        axis.ticks.x = element_line(size = 0), axis.line = element_line(size = 0.5, linetype = "solid"))+
+  scale_y_continuous(limits = c(0,7), labels = scales::number_format(accuracy = 0.1))+
+  labs(x = "", y = "LF/HF", title = "Sham")+
+  theme(plot.title = element_text(hjust = 0.5), legend.position = "none")
+
+library(patchwork)
+   p0 /
+(p1 | p2)
+#ggsave("results/logLFHF.png", width = 12, height = 8, unit = "in")
+
+   
+layout <- '
+AB
+'
+wrap_plots(A=p1, B=p2, C=p0, design = layout) + plot_layout(guides='collect') & theme(legend.position = 'none')
+#wrap_plots(A=p1, B=p2, C=p3, D=p4, E=p5, F=p6, G=p7, design = layout)*theme(legend.position = "right")
+#ggsave("results/LFHF_individual.png", width = 12, height = 8, unit = "in")
+
+layout <- '
+#CCCCCCCC#
+AAAAABBBBB
+'
+layout <- '
+CCCCCCCC##
+AAAAAABBBB
+'
+wrap_plots(A=p1, B=p2, C=p0, design = layout) 
+ggsave("results/LFHF.png", width = 8, height = 7, unit = "in")
+
+
+```
+
+```{r}
+# Function to calculate within-subject Cohen's d
+cohen_d_within_subjects <- function(estimate, SE, n) {
+  d <- estimate / (SE * sqrt(n))
+  return(d)
+}
+
+# Sample size
+n <- 20
+
+# Define the contrasts and their estimates and SE
+contrasts <- list(
+  # Active - Sham contrasts
+  active_sham_pre  = c(estimate = 0.233, SE = 0.187),
+  active_sham_on   = c(estimate = -0.243, SE = 0.187),
+  active_sham_post = c(estimate = -0.478, SE = 0.187),
+  
+  # Within Active group contrasts
+  active_pre_on    = c(estimate = -0.03836, SE = 0.187),
+  active_on_post   = c(estimate = 0.03289, SE = 0.187),
+  active_pre_post  = c(estimate = -0.00546, SE = 0.187),
+  
+  # Within Sham group contrasts
+  sham_pre_on      = c(estimate = -0.51400, SE = 0.187),
+  sham_on_post     = c(estimate = -0.20183, SE = 0.187),
+  sham_pre_post    = c(estimate = -0.71582, SE = 0.187)
+)
+
+# Calculate Cohen's d for each contrast
+d_values <- sapply(contrasts, function(x) cohen_d_within_subjects(x["estimate"], x["SE"], n))
+
+# Print the results
+cat("Within-subject Cohen's d for all contrasts:\n")
+print(d_values)
+
+#Active-Sham (at Pre), Active-Sham (at On), Active-Sham (at Post)
+#Pre-On (in Active), On-Post (in Active), Pre-Post (in Active)
+#Pre-On (in Sham), On-Post (in Sham), Pre-Post (in Sham)
+
+
+```
+
+
+
+#Bar
+```{r}
+library(dplyr)
+library(ggplot2)
+fm.AdjM %>%
+dplyr::rename(adjMean = 'adjusted mean', se = 'SE of link') %>%
+ggplot(aes(x = Time, y = adjMean, fill = Session)) +
+  theme_classic(base_size = 12, base_family = "") +
+  geom_bar(stat = 'identity', position = position_dodge(0.5), width = 0.5) +
+  geom_errorbar(aes(ymin = adjMean-se, ymax = adjMean+se), 
+                alpha = 0.8, size = 0.5, position = position_dodge(0.5), width = 0.1) +
+  scale_fill_manual(values = c("darkgreen",  "orange"), labels = c("Active","Sham")) +
+  scale_y_continuous(limits = c(0, max(fm.AdjM$`adjusted mean` + fm.AdjM$`SE of link`)),expand=c(0,0)) +
+  theme(legend.text = element_text(size=12), legend.title = element_text(size=14), 
+        axis.title.x = element_text(size=14), axis.title.y = element_text(vjust = 0.5,angle=90,size=14),
+        axis.text.x = element_text(size=12,colour="black"), axis.text.y = element_text(size=12,colour="black"), 
+        axis.ticks.x = element_line(size = 0), axis.line = element_line(size = 0.5, linetype = "solid")) +
+    labs(x = "", y = "log(LF/HF)", title = "") +
+    labs(fill = "") ->p3
+p3
+
+# beeswarm
+library(ggbeeswarm)
+# Create the plot
+ggplot(dat, aes(x = Time, y = LFHF, color = Session)) +
+  theme_classic(base_size = 12, base_family = "") +
+  geom_boxplot(aes(fill = Session), alpha = 0.8, outlier.shape = NA, position = position_dodge(0.77)) +
+  geom_beeswarm(dodge.width = 0.77, size = 2.5, alpha = 1.0) +
+  stat_summary(fun = mean, geom = "point", shape = 23, size = 3, fill = "white", position = position_dodge(0.77)) +
+  #stat_summary(fun.data = mean_se, geom = "errorbar", width = 0.2, position = position_dodge(0.75)) +
+  scale_color_manual(values = c("darkgreen",  "orange"), labels = c("Active","Sham")) +
+  scale_fill_manual(values = c("darkgreen",  "orange"), labels = c("Active","Sham")) +
+  theme(legend.text = element_text(size=12), 
+        legend.title = element_text(size=14), 
+        axis.title.x = element_text(size=14), 
+        axis.title.y = element_text(vjust = 0.5,angle=90,size=14),
+        axis.text.x = element_text(size=12,colour="black"), 
+        axis.text.y = element_text(size=12,colour="black"), 
+        axis.ticks.x = element_line(size = 0), 
+        axis.line = element_line(size = 0.5, linetype = "solid")) +
+  labs(x = "", y = "log(LF/HF)", title = "") +
+  labs(color = "", fill = "") -> p4
+
+p4
+
+
+ggsave("results/logLFHF_boxplot.png", width = 5, height = 5, unit = "in")
+
+
+
+```

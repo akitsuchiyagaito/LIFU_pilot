@@ -1,0 +1,318 @@
+---
+title: "ECG Data Extraction"
+Author: "Daniel N. Albohn"
+output: 
+  html_document:
+    theme: cosmo
+    css: style.css
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE, error = FALSE, eval = FALSE)
+```
+
+# Do it all together
+
+```{r}
+library(readr)
+
+#dirs <- list.dirs(path = "data/Active", pattern = "^sub-", full.names = TRUE, recursive = FALSE)
+
+
+# List all files and directories within the specified path (non-recursively)
+all_items <- list.files(path = "data/active", full.names = TRUE, recursive = FALSE, include.dirs = TRUE)
+
+# Filter files to match the pattern "^sub-"
+dirs <- all_items[grepl("^sub-", basename(all_items))]
+
+# Print the list of files
+print(dirs)
+
+
+
+for (dir in dirs) {
+  # Extract the subject ID from the directory name
+  subject_id <- basename(dir)
+  
+  # List all session files for the current subject
+  session_files <- list.files(dir, pattern = paste0(subject_id, "_ses-v._task-sonication_physio.tsv"), full.names = TRUE)
+
+  if (length(session_files) == 0) {
+    warning(paste0("No session files found in directory ", dir, ". Skipping this subject."))
+    next  # Skip the rest of this loop iteration
+  }
+  
+  for (file_path in session_files) {
+    # Check if the file exists
+    if (!file.exists(file_path)) {
+      warning(paste0("File ", file_path, " does not exist. Skipping this session."))
+      next  # Skip the rest of this loop iteration
+    }
+    
+    # Read the data
+    df <- read.csv(file_path)
+    
+    # Extract ECG
+    recg <- df$`ECG100C (mV)`
+    ecg <- df[,`ECG100C (mV)`]
+    
+    # Extract triggers 
+    rtrigger <- df$`Sonication - Custom, HLT100C - A10 (Volts)`
+    triggers <- df[,`Sonication - Custom, HLT100C - A10 (Volts)`]
+    
+    # Add a time variable so we can see keep track of what happens when.
+    rtime <- df$`time (s)`
+    time <- df[,`time (s)`]
+    time_ms <- time*1000
+
+    #data <- data.frame(time = time_ms, ecg = ecg, trigger = triggers)
+    df <- data.frame(time = time, ecg = ecg, trigger = triggers)
+    #plotdf <- data[1000:5000,] # first 4 seconds
+    plotdf <- df[1000:10000,] # first 4 seconds
+
+    library(ggplot2)
+    
+    ggplot(plotdf, aes(x=time, y=ecg)) +
+      geom_line() +
+      theme_bw(base_size = 15)
+    
+    
+    #identify the begining of sonication
+    df_on<-dplyr::filter(df, trigger>4)
+    #grab the timing of end of sonication
+    max_value <- max(df_on$time) #this is the end of sonication (time, sec)
+    #max_row <- which.max(df_on$time) 
+    #find the row number in df which matches the end of sonication timing
+    #max_row_df <- which(df$time == max_value) #row number of sonication ended
+    #start_row <- max(1, max_row_df - 160000)
+    #selected_rows <- df[start_row:max_row_df, ]
+    
+    #adjust the time scale based on the beginning of sonication
+    #shift extra seconds before the beginning of baseline to select 5mins, 300sec for Pre and Post sonication
+    #sonication start should be 300sec
+    #sonication end should be 380sec
+    #df <- dplyr::mutate(df, time_adj=time-(df_on[1,1]-300))
+    df <- dplyr::mutate(df, time_adj=time-(max_value-380))
+    
+    
+    #time point for on should be 16k (2000 Hz (samples per second), then for 8 seconds of data you should have 2000 * 8 = 16000 time points)
+    #df_on<-dplyr::filter(df, time_adj>=300)
+    #df_on<-dplyr::filter(df_on, time_adj<380)
+    df <- dplyr::mutate(df, stim=dplyr::case_when(time_adj>=0 & time_adj<=300 ~ "Pre", 
+                                           time_adj>300 & time_adj<=380 ~ "ON", 
+                                           time_adj>380 & time_adj<=680 ~"Post", 
+                                           TRUE ~ ""))
+    exp <- c('Pre', 'ON', 'Post')
+    df_exp <- dplyr::filter(df, stim %in% exp)
+    
+    df_exp <- dplyr::select(df_exp, -time)
+    df_exp <- dplyr::rename(df_exp, time = time_adj)
+    
+    df_pre <- dplyr::filter(df, stim=="Pre") #600k time points
+    df_post <- dplyr::filter(df, stim=="Post") #600k time points
+    df_on <- dplyr::filter(df, stim=="ON") #160K time points
+
+    # Combine all of the data together into a single dataframe and plot the raw signal just to have a look at it
+    # When saving, use the subject ID and session to create a unique file name
+    session_id <- sub('.*_(ses-v.)_.*', '\\1', basename(file_path))
+    #saveRDS(df_exp, file = file.path(dir, paste0(subject_id, "-", session_id, ".RDS")))
+    file_path_rds <- file.path(dir, paste0(subject_id, "-", session_id, ".RDS"))
+
+    if (file.exists(file_path_rds)) {
+      warning(paste0("File ", file_path_rds, " already exists. Skipping this session to avoid overwriting."))
+    } else {
+      saveRDS(df_exp, file = file_path_rds)
+    }
+
+  }
+}
+
+
+
+```
+
+
+# Do it one by one:::recommended
+```{r}
+
+library(readr)
+group <- "sham"
+subject_id <- "sub-BX499" 
+visit_name <- "ses-v3"      
+group_dir <- paste0("data/", group)
+df_dir <- paste0(group_dir,"/",subject_id,"_",visit_name,"_task-sonication_physio.tsv")
+
+#import TSV file into data frame
+df <- read.csv(df_dir, check.names=FALSE)
+# Extract ECG
+recg <- df$"ECG100C (mV)"
+ecg <- df[,"ECG100C (mV)"]
+    
+# Extract triggers 
+rtrigger <- df$"Sonication - Custom, HLT100C - A10 (Volts)"
+triggers <- df[,"Sonication - Custom, HLT100C - A10 (Volts)"]
+
+```
+
+#Now, let's add a time variable so we can see keep track of what happens when.
+
+```{r}
+rtime <- df$"time (s)"
+time <- df[,"time (s)"]
+#options(digits.secs=3)
+time_ms <- time*1000
+
+```
+
+
+#Next, we combine all of the data together into a single dataframe and plot the raw signal just to have a look at it.
+
+```{r}
+#data <- data.frame(time = time_ms, ecg = ecg, trigger = triggers)
+df <- data.frame(time = time, ecg = ecg, trigger = triggers)
+#plotdf <- data[1000:5000,] # first 4 seconds
+plotdf <- df[1000:10000,] # first 4 seconds
+
+library(ggplot2)
+
+ggplot(plotdf, aes(x=time, y=ecg)) +
+  geom_line() +
+  theme_bw(base_size = 15)
+```
+
+
+```{r}
+library(ggplot2)
+library(cowplot)
+#identify the beginning of sonication
+df_on<-dplyr::filter(df, trigger>4)
+#grab the timing of end of sonication
+max_value <- max(df_on$time) #this is the end of sonication (time, sec)
+#max_row <- which.max(df_on$time) 
+#find the row number in df which matches the end of sonication timing
+#max_row_df <- which(df$time == max_value) #row number of sonication ended
+#start_row <- max(1, max_row_df - 160000)
+#selected_rows <- df[start_row:max_row_df, ]
+
+#adjust the time scale based on the beginning of sonication
+#shift extra seconds before the beginning of baseline to select 5mins, 300sec for Pre and Post sonication
+#sonication start should be 300sec
+#sonication end should be 380sec
+#df <- dplyr::mutate(df, time_adj=time-(df_on[1,1]-300))
+df <- dplyr::mutate(df, time_adj=time-(max_value-380))
+
+
+#time point for on should be 16k (2000 Hz (samples per second), then for 8 seconds of data you should have 2000 * 8 = 16000 time points)
+#df_on<-dplyr::filter(df, time_adj>=300)
+#df_on<-dplyr::filter(df_on, time_adj<380)
+df <- dplyr::mutate(df, stim=dplyr::case_when(time_adj>=0 & time_adj<=300 ~ "Pre", 
+                                       time_adj>300 & time_adj<=380 ~ "ON", 
+                                       time_adj>380 & time_adj<=680 ~"Post", 
+                                       TRUE ~ ""))
+exp <- c('Pre', 'ON', 'Post')
+df_exp <- dplyr::filter(df, stim %in% exp)
+
+df_exp <- dplyr::select(df_exp, -time)
+df_exp <- dplyr::rename(df_exp, time = time_adj)
+
+df_pre <- dplyr::filter(df, stim=="Pre") #600k time points
+df_post <- dplyr::filter(df, stim=="Post") #600k time points
+df_on <- dplyr::filter(df, stim=="ON") #160K time points
+
+
+#Check ECG for 4 seconds 
+library(ggplot2)
+# Get the time when the Pre stimulation starts
+pre_start <- min(df$time[df$stim == "Pre"])
+# Select the range of 4 seconds after the Pre stimulation starts
+plotdf_pre <- df[(df$time >= pre_start) & (df$time < (pre_start + 4)), ]
+# Get the time when the stimulation starts
+stim_start <- min(df$time[df$stim == "ON"])
+# Select the range of 4 seconds after the stimulation starts
+plotdf_on <- df[(df$time >= stim_start) & (df$time < (stim_start + 4)), ]
+# Get the time when the Post stimulation starts
+post_start <- min(df$time[df$stim == "Post"])
+# Select the range of 4 seconds after the Post stimulation starts
+plotdf_post <- df[(df$time >= post_start) & (df$time < (post_start + 4)), ]
+
+# Plot for "Pre" phase
+plot_pre <- ggplot(plotdf_pre, aes(x=time, y=ecg)) +
+  geom_line() +
+  ggtitle("ECG for first 4 seconds of 'Pre' phase") +
+  theme_bw(base_size = 15)
+
+# Plot for "ON" phase
+plot_on <- ggplot(plotdf_on, aes(x=time, y=ecg)) +
+  geom_line() +
+  ggtitle("ECG for first 4 seconds of 'ON' phase") +
+  theme_bw(base_size = 15)
+
+# Plot for "Post" phase
+plot_post <- ggplot(plotdf_post, aes(x=time, y=ecg)) +
+  geom_line() +
+  ggtitle("ECG for first 4 seconds of 'Post' phase") +
+  theme_bw(base_size = 15)
+
+
+
+
+# Histogram plot for df
+hist_plot <- ggplot(df, aes(x=time, fill=stim)) + 
+  geom_histogram(position="identity", alpha=0.5, binwidth=1) + #1sec and count should be 2000 since this is 2000Hz (2000 samples/sec)
+  labs(x="Time (sec)", y="Count", title="Stimulus Timing", fill="Stimulus") +
+  theme_minimal() +
+  scale_fill_manual(values=c("Pre"="blue", "ON"="red", "Post"="green"))
+
+# Histogram plot for df_exp
+hist_plot_exp <- ggplot(df_exp, aes(x=time, fill=stim)) + 
+  geom_histogram(position="identity", alpha=0.5, binwidth=1) + 
+  labs(x="Time (sec)", y="Count", title="Stimulus Timing", fill="Stimulus") +
+  theme_minimal() +
+  scale_fill_manual(values=c("Pre"="blue", "ON"="red", "Post"="green"))
+
+# Check if sonication was not interrupted
+df_plot <- df[df$time > min(df_on$time) & df$time < max(df_on$time),]
+trigger_plot <- ggplot(df_plot, aes(x = time, y = trigger)) +
+  geom_line() +
+  labs(x = "Time (seconds)", y = "Trigger", title = "Trigger over time") +
+  theme_minimal()
+
+# +- 30sec plotted
+df_plot_2 <- df[df$time > (min(df_on$time) - 30) & df$time < (max(df_on$time) + 30),]
+trigger_plot_2 <- ggplot(df_plot_2, aes(x = time, y = trigger)) +
+  geom_line() +
+  geom_vline(aes(xintercept = min(df_on$time)), color = "red", linetype = "dashed") +
+  geom_vline(aes(xintercept = max(df_on$time)), color = "red", linetype = "dashed") +
+  labs(x = "Time (seconds)", y = "Trigger", title = "Trigger over time") +
+  theme_minimal()
+
+# Create an empty plot for the placeholder
+empty_plot <- ggplot() + theme_void()
+
+# Arrange plots using cowplot
+combined_plot <- plot_grid(
+  plot_pre, plot_on, 
+  plot_post, empty_plot,  # Empty plot as a placeholder
+  hist_plot, hist_plot_exp,
+  trigger_plot, trigger_plot_2,
+  labels = "AUTO",
+  ncol = 2
+  )
+
+# Define the file name using subject ID and visit name
+file_name <- paste0(group_dir, "/",subject_id, "_", visit_name, "_task-sonication_physio_plots.png")
+
+# Save the combined plot to an image file
+ggsave(file_name, combined_plot, width = 15, height = 20)
+
+```
+
+#If we are happy with how the raw data looks, we can move forward with saving the data. We will save it as a `.RDS` file so we can easily read it back into `R` in the next section.
+
+```{r}
+file_name <- paste0(group_dir, "/",subject_id, "_", visit_name, ".RDS")
+saveRDS(df_exp, file = file_name)
+```
+
