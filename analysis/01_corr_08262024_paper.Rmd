@@ -1,0 +1,1014 @@
+---
+title: "ACNP"
+output: html_document
+date: "2023-02-16"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+#MDD only: Pre Post
+```{r}
+library(readxl)
+library(dplyr)
+library(ggplot2)
+
+dat1 <- read.csv('./data/demo.csv')
+dat2 <- read.csv('./data/MADRS.csv')
+dat3 <- read.csv('./data/BSRI.csv')
+dat4 <- read.csv("./data/PANAS.csv")
+
+#Remove the empty rows
+dat1 <- dat1[!is.na(dat1$SID),]
+
+# Rename the column
+dat2 <- rename(dat2, SID = record_id)
+dat3 <- rename(dat3, SID = record_id)
+dat4 <- rename(dat4, SID = record_id)
+
+
+
+
+dat <- merge(dat1, dat2, by.x = "SID")
+dat <- left_join(dat, dat3, by.x = "SID")
+dat <- left_join(dat, dat4, by.x = "SID")
+#dat <- dat %>% filter(!(SID %in% c("AV503", "AW090", "BB898","BM110", "BR717", "BU113", "BU206", "BU640", "BU693", "BU894")))
+#dat <- dat %>% filter(!(SID %in% c("BM110", "BR717", "BU113", "BU206", "BU640", "BU693", "BU894")))
+#write.csv(dat, 'test.csv')
+
+dat <- dat %>%
+    mutate(redcap_event_name = ifelse(Order == "A",
+                                      case_when(
+                                          redcap_event_name == "visit_1_day_1_pre_arm_1" ~ "FUS_pre",
+                                          redcap_event_name == "visit_1_day_1_post_arm_1" ~ "FUS_post",
+                                          redcap_event_name == "visit_3_day144_pre_arm_1" ~ "Sham_pre",
+                                          redcap_event_name == "visit_3_day144_pos_arm_1" ~ "Sham_post",
+                                          redcap_event_name == "screening_day_7_to_arm_1" ~ "Screening",
+                                          redcap_event_name == "visit_2_day74_arm_1" ~ "V2",
+                                          redcap_event_name == "visit_4_day214_arm_1" ~ "V4",
+                                          TRUE ~ redcap_event_name),
+                                      ifelse(Order == "B",
+                                             case_when(
+                                                 redcap_event_name == "visit_1_day_1_pre_arm_1" ~ "Sham_pre",
+                                                 redcap_event_name == "visit_1_day_1_post_arm_1" ~ "Sham_post",
+                                                 redcap_event_name == "visit_3_day144_pre_arm_1" ~ "FUS_pre",
+                                                 redcap_event_name == "visit_3_day144_pos_arm_1" ~ "FUS_post",
+                                                 redcap_event_name == "screening_day_7_to_arm_1" ~ "Screening",
+                                                 redcap_event_name == "visit_2_day74_arm_1" ~ "V2",
+                                                 redcap_event_name == "visit_4_day214_arm_1" ~ "V4",
+                                                 TRUE ~ redcap_event_name),
+                                             redcap_event_name)))
+
+# Change the factor order
+dat$redcap_event_name <- factor(dat$redcap_event_name, levels = c("Screening", "FUS_pre", "FUS_post", "V2", "Sham_pre", "Sham_post", "V4"))
+dat$Group <- factor(dat$Group, levels = c("High", "Low", "HC"))
+
+#Remove V2, Screening, V4
+dat <- filter(dat, redcap_event_name != "V2")
+dat <- filter(dat, redcap_event_name != "Screening")
+dat <- filter(dat, redcap_event_name != "V4")            
+
+
+
+# Create a new group where High and Low are combined into MDD
+dat$Group2 <- ifelse(dat$Group %in% c("High", "Low"), "MDD", "HC")
+
+dat$Group2 <- factor(dat$Group2, levels = c("MDD", "HC"))
+
+# Creat a new time where pre and post are combined regardless of FUS or Sham
+dat$redcap_event_name2 <- ifelse(dat$redcap_event_name %in% c("FUS_pre", "Sham_pre"), "Pre", "Post")
+
+dat$redcap_event_name2 <- factor(dat$redcap_event_name2, levels = c("Pre", "Post"))
+
+
+summary_dat <- dat %>%
+  group_by(Group2, redcap_event_name) %>%
+  summarize(
+    mean_madrs_score = mean(madrs_score, na.rm = TRUE),
+    sd_madrs_score = sd(madrs_score, na.rm = TRUE)
+  )
+
+#MDD ONLY
+dat <- dat %>% filter(!(Group %in% c("HC")))
+
+
+```
+
+#Filter MDD: calculate difference
+```{r}
+library(dplyr)
+library(ggplot2)
+library(rstatix)
+library(tidyr)
+library(readr)
+library(gridExtra)
+
+# Rename the group and filter MDD subjects
+df <- dat %>%
+  mutate(Group2 = dplyr::recode(Group, "High" = "MDD", "Low" = "MDD", "HC" = "HC")) %>%
+  mutate(Group2 = factor(Group2, levels = c("MDD", "HC")))
+
+df_MDD <- df %>%
+  dplyr::filter(Group2 == "MDD")
+
+# Function to compute the differences and calculate mean and SD
+compute_and_summarize <- function(relevant_data, title) {
+  # Calculate the mean and SD for FUS and Sham conditions at Pre and Post time points
+  summary_stats <- list(
+    FUS_pre = relevant_data %>%
+      summarize(
+        mean_score = mean(FUS_pre, na.rm = TRUE),
+        sd_score = sd(FUS_pre, na.rm = TRUE)
+      ),
+    FUS_post = relevant_data %>%
+      summarize(
+        mean_score = mean(FUS_post, na.rm = TRUE),
+        sd_score = sd(FUS_post, na.rm = TRUE)
+      ),
+    Sham_pre = relevant_data %>%
+      summarize(
+        mean_score = mean(Sham_pre, na.rm = TRUE),
+        sd_score = sd(Sham_pre, na.rm = TRUE)
+      ),
+    Sham_post = relevant_data %>%
+      summarize(
+        mean_score = mean(Sham_post, na.rm = TRUE),
+        sd_score = sd(Sham_post, na.rm = TRUE)
+      ),
+    Active = relevant_data %>%
+      summarize(
+        mean_diff = mean(FUS_post - FUS_pre, na.rm = TRUE),
+        sd_diff = sd(FUS_post - FUS_pre, na.rm = TRUE)
+      ),
+    Sham = relevant_data %>%
+      summarize(
+        mean_diff = mean(Sham_post - Sham_pre, na.rm = TRUE),
+        sd_diff = sd(Sham_post - Sham_pre, na.rm = TRUE)
+      )
+  )
+
+  return(summary_stats)
+}
+
+# Affect types and their corresponding column names and titles
+affect_types <- list(
+  bsri = list(column = "bsri_score", title = "BSRI"),
+  madrs = list(column = "madrs_score", title = "MADRS"),
+  panasx_negaffect_score = list(column = "panasx_negaffect_score", title = "PANASX Negative Affect"),
+  panasx_posaffect_score = list(column = "panasx_posaffect_score", title = "PANASX Positive Affect"),
+  panasx_fear_score = list(column = "panasx_fear_score", title = "PANASX Fear"),
+  panasx_hostility_score = list(column = "panasx_hostility_score", title = "PANASX Hostility"),
+  panasx_guilt_score = list(column = "panasx_guilt_score", title = "PANASX Guilt"),
+  panasx_sadness_score = list(column = "panasx_sadness_score", title = "PANASX Sadness"),
+  panasx_joviality_score = list(column = "panasx_joviality_score", title = "PANASX Joviality"),
+  panasx_selfassurance_score = list(column = "panasx_selfassurance_score", title = "PANASX Self Assurance"),
+  panasx_attentiveness_score = list(column = "panasx_attentiveness_score", title = "PANASX Attentiveness"),
+  panasx_shyness_score = list(column = "panasx_shyness_score", title = "PANASX Shyness"),
+  panasx_fatigue_score = list(column = "panasx_fatigue_score", title = "PANASX Fatigue"),
+  panasx_serenity_score = list(column = "panasx_serenity_score", title = "PANASX Serenity"),
+  panasx_surprise_score = list(column = "panasx_surprise_score", title = "PANASX Surprise")
+)
+
+# Results storage
+summary_results <- list()
+
+# Perform computations for each affect type
+for (affect_type in names(affect_types)) {
+  column_name <- affect_types[[affect_type]]$column
+  title <- affect_types[[affect_type]]$title
+  
+  # Filter the dataframe for relevant events and columns
+  relevant_data <- df_MDD %>%
+    select(SID, redcap_event_name, !!sym(column_name)) %>%
+    pivot_wider(names_from = redcap_event_name, values_from = !!sym(column_name)) %>%
+    drop_na()
+
+  # Compute and summarize
+  if(all(c("FUS_pre", "FUS_post", "Sham_pre", "Sham_post") %in% names(relevant_data))) {
+    summary_stats <- compute_and_summarize(relevant_data, title)
+    summary_results[[title]] <- summary_stats
+  }
+}
+
+# Combine summary results into a data frame
+mean_sd_summary <- do.call(rbind, lapply(names(summary_results), function(title) {
+  data.frame(
+    Subscale = title,
+    Condition = c("FUS_pre", "FUS_post", "Sham_pre", "Sham_post", "Active", "Sham"),
+    Mean = c(
+      summary_results[[title]]$FUS_pre$mean_score,
+      summary_results[[title]]$FUS_post$mean_score,
+      summary_results[[title]]$Sham_pre$mean_score,
+      summary_results[[title]]$Sham_post$mean_score,
+      summary_results[[title]]$Active$mean_diff,
+      summary_results[[title]]$Sham$mean_diff
+    ),
+    SD = c(
+      summary_results[[title]]$FUS_pre$sd_score,
+      summary_results[[title]]$FUS_post$sd_score,
+      summary_results[[title]]$Sham_pre$sd_score,
+      summary_results[[title]]$Sham_post$sd_score,
+      summary_results[[title]]$Active$sd_diff,
+      summary_results[[title]]$Sham$sd_diff
+    )
+  )
+}))
+
+# Print the summary table
+print(mean_sd_summary)
+
+# Save the summary table to a CSV file
+write_csv(mean_sd_summary, "./table/difference_mean_sd_summary.csv")
+
+
+
+```
+
+
+
+#Filter MDD: Group comparison and plot
+```{r}
+library(dplyr)
+library(ggplot2)
+library(rstatix)
+library(tidyr)
+library(readr)
+library(gridExtra)
+
+# Rename the group and filter MDD subjects
+df <- dat %>%
+  mutate(Group2 = dplyr::recode(Group, "High" = "MDD", "Low" = "MDD", "HC" = "HC")) %>%
+  mutate(Group2 = factor(Group2, levels = c("MDD", "HC")))
+
+df_MDD <- df %>%
+  dplyr::filter(Group2 == "MDD")
+
+# Function to compute the differences and then perform a statistical comparison
+compute_and_compare <- function(fus_data, sham_data, title) {
+  # If there are not enough data points, skip the comparison
+  if(nrow(fus_data) < 1 || nrow(sham_data) < 1) {
+    return(list(wilcoxon_test = NA, rank_biserial = NA))
+  }
+
+  # Ensure that both data frames have the same subjects in the same order
+  # This is crucial for a paired analysis
+  if (!all(fus_data$SID == sham_data$SID)) {
+    return(list(wilcoxon_test = NA, rank_biserial = NA, message = "Subjects are not properly paired."))
+  }
+
+  # Prepare data for the Wilcoxon signed-rank test
+  comparison_data <- fus_data %>%
+    rename(Difference = !!paste0("Difference_", title)) %>%
+    mutate(Group = "Active") %>%
+    bind_rows(sham_data %>%
+                rename(Difference = !!paste0("Difference_", title)) %>%
+                mutate(Group = "Sham"))
+
+  # Compare differences between Active and Sham using Wilcoxon signed-rank test
+  wilcoxon_test_result <- wilcox_test(Difference ~ Group, paired = TRUE, data = comparison_data)
+
+  # Calculate the rank-biserial correlation manually
+  differences <- comparison_data %>%
+    filter(Group == "Active") %>%
+    mutate(Difference = Difference - comparison_data %>%
+             filter(Group == "Sham") %>%
+             pull(Difference))
+
+  pos_diff <- sum(differences$Difference > 0)
+  neg_diff <- sum(differences$Difference < 0)
+  rank_biserial <- (pos_diff - neg_diff) / (pos_diff + neg_diff)
+
+  return(list(wilcoxon_test = wilcoxon_test_result, rank_biserial = rank_biserial, plot_data = comparison_data))
+}
+
+# Affect types and their corresponding column names and titles
+affect_types <- list(
+  bsri = list(column = "bsri_score", title = "BSRI"),
+  madrs = list(column = "madrs_score", title = "MADRS"),
+  panasx_negaffect_score = list(column = "panasx_negaffect_score", title = "PANASX Negative Affect"),
+  panasx_posaffect_score = list(column = "panasx_posaffect_score", title = "PANASX Positive Affect"),
+  panasx_fear_score = list(column = "panasx_fear_score", title = "PANASX Fear"),
+  panasx_hostility_score = list(column = "panasx_hostility_score", title = "PANASX Hostility"),
+  panasx_guilt_score = list(column = "panasx_guilt_score", title = "PANASX Guilt"),
+  panasx_sadness_score = list(column = "panasx_sadness_score", title = "PANASX Sadness"),
+  panasx_joviality_score = list(column = "panasx_joviality_score", title = "PANASX Joviality"),
+  panasx_selfassurance_score = list(column = "panasx_selfassurance_score", title = "PANASX Self Assurance"),
+  panasx_attentiveness_score = list(column = "panasx_attentiveness_score", title = "PANASX Attentiveness"),
+  panasx_shyness_score = list(column = "panasx_shyness_score", title = "PANASX Shyness"),
+  panasx_fatigue_score = list(column = "panasx_fatigue_score", title = "PANASX Fatigue"),
+  panasx_serenity_score = list(column = "panasx_serenity_score", title = "PANASX Serenity"),
+  panasx_surprise_score = list(column = "panasx_surprise_score", title = "PANASX Surprise")
+)
+
+# Results storage
+results <- list()
+wilcoxon_results <- list()
+plots <- list()
+
+# Perform computations for each affect type
+for (affect_type in names(affect_types)) {
+  column_name <- affect_types[[affect_type]]$column
+  title <- affect_types[[affect_type]]$title
+  
+  # Filter the dataframe for relevant events and columns
+  relevant_data <- df_MDD %>%
+    select(SID, redcap_event_name, !!sym(column_name)) %>%
+    pivot_wider(names_from = redcap_event_name, values_from = !!sym(column_name)) %>%
+    drop_na()
+
+  # Calculate the differences within Active and Sham
+  differences <- relevant_data %>%
+    mutate(
+      !!paste0("Difference_Active_", title) := FUS_post - FUS_pre,
+      !!paste0("Difference_Sham_", title) := Sham_post - Sham_pre
+    )
+
+  # Prepare data for comparison
+  fus_data <- differences %>%
+    select(SID, !!paste0("Difference_Active_", title)) %>%
+    rename(!!paste0("Difference_", title) := !!paste0("Difference_Active_", title))
+
+  sham_data <- differences %>%
+    select(SID, !!paste0("Difference_Sham_", title)) %>%
+    rename(!!paste0("Difference_", title) := !!paste0("Difference_Sham_", title))
+
+  # Compute statistics and compare
+  if(all(c("FUS_pre", "FUS_post", "Sham_pre", "Sham_post") %in% names(relevant_data))) {
+    comp_results <- compute_and_compare(fus_data, sham_data, title)
+    results[[affect_type]] <- comp_results
+    
+    # Save wilcoxon test results and effect size to list
+    if (!is.null(comp_results$wilcoxon_test) && !is.na(comp_results$wilcoxon_test$p)) {
+      wilcoxon_results[[title]] <- data.frame(
+        Subscale = title,
+        Statistic = comp_results$wilcoxon_test$statistic,
+        P_Value = comp_results$wilcoxon_test$p,
+        Rank_Biserial = comp_results$rank_biserial
+      )
+    }
+    
+    # Plotting the differences
+    plot_data <- results[[affect_type]]$plot_data
+    p <- ggplot(plot_data, aes(x = Group, y = Difference, fill = Group, color = Group)) +
+      geom_violin(trim = FALSE, alpha = 0.5) +
+      geom_boxplot(width = 0.1, outlier.shape = NA) +
+      geom_jitter(width = 0.2) +
+      geom_hline(yintercept = 0, linetype = "dashed", color = "black") +
+      scale_fill_manual(values = c("Active" = "darkgreen", "Sham" = "orange")) +
+      scale_color_manual(values = c("Active" = "darkgreen", "Sham" = "orange")) +
+      labs(y = paste(title, "\n(Post-Pre)")) +
+      theme_classic() +
+      theme(axis.title.x = element_blank(), legend.position = "none", text = element_text(color = "black"))
+    
+    # Save plots, separate Joviality
+    if (title == "PANASX Joviality") {
+      ggsave("panasx_joviality_plot.png", plot = p, width = 4, height = 3, dpi = 300)
+    } else {
+      plots[[title]] <- p
+    }
+  } else {
+    results[[affect_type]] <- list(wilcoxon_test = NA, rank_biserial = NA)
+  }
+}
+
+# Combine all wilcoxon test results into a single dataframe and save as CSV
+if (length(wilcoxon_results) > 0) {
+  wilcoxon_results_df <- do.call(rbind, wilcoxon_results)
+  write_csv(wilcoxon_results_df, "affect_wilcoxon_results.csv")
+}
+
+# Save all plots except Joviality in one figure without legends
+# Create an empty plot as a placeholder
+empty_plot <- ggplot() + 
+  theme_void() + 
+  theme(plot.background = element_rect(fill = "white", color = NA))
+
+if (length(plots) > 0) {
+  # Ensure MADRS and BSRI are in the first row
+  ordered_plots <- list(plots[["BSRI"]], plots[["MADRS"]],  plots[["empty_plot"]])
+  ordered_plots <- c(ordered_plots, plots[setdiff(names(plots), c("BSRI", "MADRS"))])
+
+  # Arrange plots
+  combined_plot <- grid.arrange(
+    grobs = ordered_plots,
+    ncol = 3,
+    nrow = ceiling(length(ordered_plots) / 3)
+  )
+  
+  # Save the combined plot
+  ggsave("combined_affect_plots.png", plot = combined_plot, width = 12, height = 15, units = "in", dpi = 300)
+}
+
+# Save MADRS and BSRI separately with the same size
+ggsave("madrs_plot.png", plot = plots[["MADRS"]], width = 4, height = 3, dpi = 300)
+ggsave("bsri_plot.png", plot = plots[["BSRI"]], width = 4, height = 3, dpi = 300)
+
+# Output the results and display plots
+for (affect_type in names(results)) {
+  title <- affect_types[[affect_type]]$title
+  cat(paste("\nResults for", title, ":\n"))
+  
+  # Check if the wilcoxon_test itself exists and is not NA
+  if (!is.null(results[[affect_type]]$wilcoxon_test) && !is.na(results[[affect_type]]$wilcoxon_test$p)) {
+    cat(paste("Wilcoxon signed-rank test results for -", title, "-:\n"))
+    print(results[[affect_type]]$wilcoxon_test)
+    cat(paste("Rank-biserial correlation for -", title, "-:", results[[affect_type]]$rank_biserial, "\n"))
+    
+    # Display plot
+    if (title != "PANASX Joviality") {
+      print(plots[[title]])
+    }
+  } else {
+    cat("No data available for this group.\n")
+  }
+}
+
+
+
+
+```
+
+
+
+# Corr between connectivity and var
+```{r}
+
+dat5 <- read.csv("./data/MDD_Rest1_usable_clusters_betavalues_Tha_R_8_2.csv")
+
+dat <- left_join(dat, dat5, by.x = "SID")
+
+
+library(tidyr)
+library(dplyr)
+
+# List of panasx variables plus bsri_score to process
+score_vars <- c("bsri_score", "panasx_negaffect_score", "panasx_posaffect_score", "panasx_fear_score", 
+                "panasx_hostility_score", "panasx_guilt_score", "panasx_sadness_score", 
+                "panasx_joviality_score", "panasx_selfassurance_score", "panasx_attentiveness_score", 
+                "panasx_shyness_score", "panasx_fatigue_score", "panasx_serenity_score", 
+                "panasx_surprise_score")
+
+# Process each score variable including bsri_score
+for (var in score_vars) {
+  # Spread for FUS
+  spread_fus <- dat %>%
+    select(SID, redcap_event_name, !!sym(var)) %>%
+    filter(redcap_event_name %in% c("FUS_post", "FUS_pre")) %>%
+    spread(key = redcap_event_name, value = !!sym(var))
+  
+  spread_fus <- spread_fus %>%
+    mutate(!!paste0(var, "_d_fus") := FUS_post - FUS_pre)
+  
+  # Spread for Sham
+  spread_sham <- dat %>%
+    select(SID, redcap_event_name, !!sym(var)) %>%
+    filter(redcap_event_name %in% c("Sham_post", "Sham_pre")) %>%
+    spread(key = redcap_event_name, value = !!sym(var))
+  
+  spread_sham <- spread_sham %>%
+    mutate(!!paste0(var, "_d_sham") := Sham_post - Sham_pre)
+  
+  # Join with dat_FUS_post
+  dat_FUS_post <- dat %>%
+    filter(redcap_event_name %in% c("FUS_post")) %>%
+    left_join(spread_fus[, c("SID", paste0(var, "_d_fus"))], by = "SID") %>%
+    select(-c("redcap_event_name"))
+  
+  # Join with dat_Sham_post
+  dat_Sham_post <- dat %>%
+    filter(redcap_event_name %in% c("Sham_post")) %>%
+    left_join(spread_sham[, c("SID", paste0(var, "_d_sham"))], by = "SID")%>%
+    select(-c("redcap_event_name"))
+  
+  # Combine FUS and Sham
+  dat_post <- dat_FUS_post %>% 
+    left_join(dat_Sham_post[, c("SID", paste0(var, "_d_sham"))], by ="SID") 
+  
+  # Add post scores for FUS and Sham
+  post_fus <- dat %>%
+    select(SID, redcap_event_name, !!sym(var)) %>%
+    filter(redcap_event_name %in% c("FUS_post")) %>%
+    rename(!!paste0(var, "_fus") := !!sym(var))
+  
+  post_sham <- dat %>%
+    select(SID, redcap_event_name, !!sym(var)) %>%
+    filter(redcap_event_name %in% c("Sham_post")) %>%
+    rename(!!paste0(var, "_sham") := !!sym(var))
+  
+  dat_post <- dat_post %>%
+    left_join(post_fus[, c("SID", paste0(var, "_fus"))], by ="SID") %>%
+    left_join(post_sham[, c("SID", paste0(var, "_sham"))], by ="SID")
+  
+  # Optional: write the result for each variable
+  # write_csv(dat_post, paste0("dat_", var, "_d.csv"))
+}
+
+# Optional: If you want to save the final dat_post with all the variables joined:
+# write_csv(dat_post, "dat_scores_all.csv")
+
+```
+
+# Calculate change ratio bsri
+```{r}
+bsri_spread_fus <- bsri_spread_fus %>%
+  mutate(bsri_ratio_fus = (FUS_post - FUS_pre) / FUS_pre)
+
+bsri_spread_sham <- bsri_spread_sham %>%
+  mutate(bsri_ratio_sham = (Sham_post - Sham_pre) / Sham_pre)
+
+dat_FUS_post <- dat %>%
+  filter(redcap_event_name %in% c("FUS_post")) %>%
+  left_join(bsri_spread_fus[, c("SID", "bsri_ratio_fus")], by = "SID") %>%
+  select(-c("redcap_event_name"))
+
+dat_Sham_post <- dat %>%
+  filter(redcap_event_name %in% c("Sham_post")) %>%
+  left_join(bsri_spread_sham[, c("SID", "bsri_ratio_sham")], by = "SID") %>%
+  select(-c("redcap_event_name"))
+
+dat_post_ratio <- dat_FUS_post %>% 
+  left_join(dat_Sham_post[, c("SID", "bsri_ratio_sham")], by ="SID") 
+
+
+dat_post <- dat_post %>%
+  left_join(dat_post_ratio [, c("SID", "bsri_ratio_fus",  "bsri_ratio_sham")], by ="SID") 
+```
+
+
+#Calculate change ratio all
+
+```{r}
+library(tidyr)
+library(dplyr)
+
+# List of variables to process
+score_vars <- c("bsri_score", "panasx_negaffect_score", "panasx_posaffect_score", "panasx_fear_score", 
+                "panasx_hostility_score", "panasx_guilt_score", "panasx_sadness_score", 
+                "panasx_joviality_score", "panasx_selfassurance_score", "panasx_attentiveness_score", 
+                "panasx_shyness_score", "panasx_fatigue_score", "panasx_serenity_score", 
+                "panasx_surprise_score")
+
+# Define clusters
+clusters <- c("vmPFC_Base_rest_r1", "vmPFC_FUS_rest_r1", "vmPFC_Sham_rest_r1", "PCC_Base_rest_r1", "PCC_FUS_rest_r1", "PCC_Sham_rest_r1")
+
+# Initialize an empty dataframe to store the final combined results
+dat_combined <- dat %>%
+  filter(redcap_event_name %in% c("FUS_pre")) %>%
+  select(SID, Group, Age, Sex, Order, Race, Hispanic, all_of(clusters))  # Selecting necessary columns to start
+  
+# Process each variable
+for (var in score_vars) {
+  # Spread for FUS
+  spread_fus <- dat %>%
+    select(SID, redcap_event_name, !!sym(var)) %>%
+    filter(redcap_event_name %in% c("FUS_post", "FUS_pre")) %>%
+    spread(key = redcap_event_name, value = !!sym(var))
+  
+  # Rename FUS_pre and FUS_post to variable_name_pre and variable_name_post
+  spread_fus <- spread_fus %>%
+    rename(!!paste0(var, "_pre_fus") := FUS_pre,
+           !!paste0(var, "_post_fus") := FUS_post) %>%
+    mutate(!!paste0(var, "_d_fus") := !!sym(paste0(var, "_post_fus")) - !!sym(paste0(var, "_pre_fus")),
+           !!paste0(var, "_ratio_fus") := (!!sym(paste0(var, "_post_fus")) - !!sym(paste0(var, "_pre_fus"))) / !!sym(paste0(var, "_pre_fus")))
+  
+  # Spread for Sham
+  spread_sham <- dat %>%
+    select(SID, redcap_event_name, !!sym(var)) %>%
+    filter(redcap_event_name %in% c("Sham_post", "Sham_pre")) %>%
+    spread(key = redcap_event_name, value = !!sym(var))
+  
+  # Rename Sham_pre and Sham_post to variable_name_pre and variable_name_post
+  spread_sham <- spread_sham %>%
+    rename(!!paste0(var, "_pre_sham") := Sham_pre,
+           !!paste0(var, "_post_sham") := Sham_post) %>%
+    mutate(!!paste0(var, "_d_sham") := !!sym(paste0(var, "_post_sham")) - !!sym(paste0(var, "_pre_sham")),
+           !!paste0(var, "_ratio_sham") := (!!sym(paste0(var, "_post_sham")) - !!sym(paste0(var, "_pre_sham"))) / !!sym(paste0(var, "_pre_sham")))
+  
+  # Join with dat_FUS
+  dat_FUS <- dat %>%
+    filter(redcap_event_name %in% c("FUS_pre")) %>%
+    left_join(spread_fus[, c("SID", paste0(var, "_d_fus"), paste0(var, "_ratio_fus"), paste0(var, "_pre_fus"), paste0(var, "_post_fus"))], by = "SID") %>%
+    select(-c("redcap_event_name"))
+  
+  # Join with dat_Sham_post
+  dat_Sham <- dat %>%
+    filter(redcap_event_name %in% c("Sham_pre")) %>%
+    left_join(spread_sham[, c("SID", paste0(var, "_d_sham"), paste0(var, "_ratio_sham"), paste0(var, "_pre_sham"), paste0(var, "_post_sham"))], by = "SID") %>%
+    select(-c("redcap_event_name"))
+  
+  # Combine FUS and Sham
+  dat_ratio <- dat_FUS %>% 
+    left_join(dat_Sham[, c("SID", paste0(var, "_d_sham"), paste0(var, "_ratio_sham"), paste0(var, "_pre_sham"), paste0(var, "_post_sham"))], by ="SID") 
+  
+  # Merge the ratio data with the main dat_post_combined dataframe
+  dat_combined <- dat_combined %>%
+    left_join(dat_ratio[, c("SID", paste0(var, "_d_fus"), paste0(var, "_d_sham"),
+                                 paste0(var, "_ratio_fus"), paste0(var, "_ratio_sham"),
+                                 paste0(var, "_pre_fus"), paste0(var, "_post_fus"),
+                                 paste0(var, "_pre_sham"), paste0(var, "_post_sham"))], by ="SID")
+}
+
+# Save the final combined dataframe
+# write_csv(dat_post_combined, "dat_scores_with_d_and_ratios.csv")
+
+
+# List of clusters to process
+clusters <- c("vmPFC_Base_rest_r1", "vmPFC_FUS_rest_r1", "vmPFC_Sham_rest_r1", 
+              "PCC_Base_rest_r1", "PCC_FUS_rest_r1", "PCC_Sham_rest_r1")
+
+# Process each cluster variable and calculate differences and ratios
+dat_clusters <- dat %>%
+  filter(redcap_event_name %in% c("FUS_pre", "FUS_post", "Sham_pre", "Sham_post")) %>%
+  select(SID, starts_with("vmPFC"), starts_with("PCC"))
+
+dat_clusters <- dat_clusters %>%
+  group_by(SID) %>%
+  mutate(
+    vmPFC_base = vmPFC_Base_rest_r1,
+    vmPFC_post_fus = vmPFC_FUS_rest_r1,
+    vmPFC_d_fus = vmPFC_FUS_rest_r1 - vmPFC_Base_rest_r1,
+    vmPFC_ratio_fus = (vmPFC_FUS_rest_r1 - vmPFC_Base_rest_r1) / vmPFC_Base_rest_r1,
+    vmPFC_post_sham = vmPFC_Sham_rest_r1,
+    vmPFC_d_sham = vmPFC_Sham_rest_r1 - vmPFC_Base_rest_r1,
+    vmPFC_ratio_sham = (vmPFC_Sham_rest_r1 - vmPFC_Base_rest_r1) / vmPFC_Base_rest_r1,
+    PCC_base = PCC_Base_rest_r1,
+    PCC_post_fus = PCC_FUS_rest_r1,
+    PCC_d_fus = PCC_FUS_rest_r1 - PCC_Base_rest_r1,
+    PCC_ratio_fus = (PCC_FUS_rest_r1 - PCC_Base_rest_r1) / PCC_Base_rest_r1,
+    PCC_post_sham = PCC_Sham_rest_r1,
+    PCC_d_sham = PCC_Sham_rest_r1 - PCC_Base_rest_r1,
+    PCC_ratio_sham = (PCC_Sham_rest_r1 - PCC_Base_rest_r1) / PCC_Base_rest_r1
+    
+  ) %>%
+  ungroup() %>%
+  # Replace -Inf values with zero
+  mutate(across(contains("ratio"), ~replace(., is.infinite(.), NA))) %>%
+  select(SID, vmPFC_base, vmPFC_post_fus, vmPFC_d_fus, vmPFC_ratio_fus, vmPFC_post_sham, vmPFC_d_sham, vmPFC_ratio_sham, 
+         PCC_base, PCC_post_fus, PCC_d_fus, PCC_ratio_fus, PCC_post_sham, PCC_d_sham, PCC_ratio_sham) %>%
+  distinct(SID, .keep_all = TRUE)  # Remove duplicate rows by SID
+
+# Left join cluster variables into dat_combined
+dat_combined <- dat_combined %>%
+  left_join(dat_clusters, by = "SID")
+
+# Save the final combined dataframe 
+# write_csv(dat_combined, "dat_scores_with_clusters.csv")
+
+
+```
+
+
+#Long format
+```{r}
+
+library(tidyr)
+library(dplyr)
+
+# Define score variables
+score_vars <- c("bsri_score", "panasx_negaffect_score", "panasx_posaffect_score", "panasx_fear_score", 
+                "panasx_hostility_score", "panasx_guilt_score", "panasx_sadness_score", 
+                "panasx_joviality_score", "panasx_selfassurance_score", "panasx_attentiveness_score", 
+                "panasx_shyness_score", "panasx_fatigue_score", "panasx_serenity_score", 
+                "panasx_surprise_score")
+
+# Define regions
+regions <- c("vmPFC", "PCC")
+
+# Pivot the data to create long format for score variables
+dat_long_scores <- dat_combined %>%
+  pivot_longer(cols = starts_with("bsri_score") | starts_with("panasx_"), 
+               names_to = c("ScoreType", "MeasureType", "Condition"),
+               names_pattern = "(.*)_(d|ratio|post|pre)_(fus|sham)",
+               values_drop_na = TRUE) %>%
+  mutate(Condition = recode(Condition,
+                            "fus" = "LIFU",
+                            "sham" = "Sham"))
+
+# Pivot the data to create long format for region variables, excluding vmPFC_base and PCC_base
+dat_long_regions <- dat_combined %>%
+  pivot_longer(cols = matches("^(vmPFC|PCC)_(d|ratio|post)_(fus|sham)$"),
+               names_to = c("Region", "MeasureType", "Condition"),
+               names_pattern = "(vmPFC|PCC)_(d|ratio|post)_(fus|sham)",
+               values_drop_na = TRUE) %>%
+  mutate(Condition = recode(Condition,
+                            "fus" = "LIFU",
+                            "sham" = "Sham"))
+
+
+# Join the long-format scores and regions, matching only the relevant columns
+dat_long <- dat_long_scores %>%
+  inner_join(dat_long_regions, by = c("SID", "Group", "Age", "Sex", "Condition", "MeasureType")) %>%
+  select(SID, Group, Age, Sex, Condition, Region, MeasureType, ScoreType, value.x, value.y) %>%
+  rename(ScoreValue = value.x, ConnectivityValue = value.y)
+
+# Remove rows where either ScoreValue or ConnectivityValue is NA
+#dat_long <- dat_long %>%
+#  filter(!is.na(ScoreValue) & !is.na(ConnectivityValue))
+
+
+
+
+
+
+```
+
+
+
+#Scatter plot all: This is the final fig
+```{r}
+library(ggplot2)
+library(dplyr)
+
+# List of regions
+regions <- c("vmPFC", "PCC")
+
+# List of score variables
+score_vars <- c("bsri_score", "panasx_negaffect_score", "panasx_posaffect_score", "panasx_fear_score", 
+                "panasx_hostility_score", "panasx_guilt_score", "panasx_sadness_score", 
+                "panasx_joviality_score", "panasx_selfassurance_score", "panasx_attentiveness_score", 
+                "panasx_shyness_score", "panasx_fatigue_score", "panasx_serenity_score", 
+                "panasx_surprise_score")
+
+# List of score types
+score_types <- c("d", "ratio", "post")
+
+# Create a directory to save the images
+dir.create("./figure/scatter_plots", showWarnings = FALSE)
+
+# Loop over each region, each score variable, and each score type
+for (region in regions) {
+  for (score_var in score_vars) {
+    for (score_type in score_types) {
+      
+      # Filter the long dataframe for the specific region and measure type
+      dat_plot <- dat_long %>%
+        filter(Region == region & MeasureType == score_type & ScoreType == score_var)
+      
+      # Define the y-axis label based on the score variable and score type
+      base_y_label <- switch(score_var,
+                             "bsri_score" = "BSRI Changes",
+                             "panasx_negaffect_score" = "PANASX Negative Affect Changes",
+                             "panasx_posaffect_score" = "PANASX Positive Affect Changes",
+                             "panasx_fear_score" = "PANASX Fear Changes",
+                             "panasx_hostility_score" = "PANASX Hostility Changes",
+                             "panasx_guilt_score" = "PANASX Guilt Changes",
+                             "panasx_sadness_score" = "PANASX Sadness Changes",
+                             "panasx_joviality_score" = "PANASX Joviality Changes",
+                             "panasx_selfassurance_score" = "PANASX Self-Assurance Changes",
+                             "panasx_attentiveness_score" = "PANASX Attentiveness Changes",
+                             "panasx_shyness_score" = "PANASX Shyness Changes",
+                             "panasx_fatigue_score" = "PANASX Fatigue Changes",
+                             "panasx_serenity_score" = "PANASX Serenity Changes",
+                             "panasx_surprise_score" = "PANASX Surprise Changes")
+
+      y_label <- paste(base_y_label, "(Post-Pre)")
+      if (score_type == "ratio") {
+        y_label <- paste(base_y_label, "(Post-Pre)/Pre")
+      } else if (score_type == "post") {
+        y_label <- base_y_label
+      }
+      
+      # Define the x-axis label based on the region
+      x_label <- ifelse(region == "vmPFC",
+                        "Thalamus-vmPFC/ACC Connectivity",
+                        "Thalamus-PCC Connectivity")
+      
+      # Construct the full score variable name for saving
+      full_score_var <- paste0(score_var, "_", score_type)
+
+      # Create the scatter plot
+      scatter_plot <- ggplot(dat_plot, aes(x = ConnectivityValue, y = ScoreValue, color = Condition)) +
+        geom_point(aes(shape = Condition), size = 3, alpha = 0.8) +
+        geom_smooth(method = "lm", se = TRUE, aes(fill = Condition), alpha = 0.1) + # Adding linear regression line and confidence interval
+        theme_linedraw() +
+        labs(title = "",
+             x = x_label,
+             y = y_label) +
+        scale_color_manual(values = c("LIFU" = "darkgreen", "Sham" = "orange")) +
+        scale_fill_manual(values = c("LIFU" = scales::alpha("darkgreen", 0.1), "Sham" = scales::alpha("orange", 0.1))) + # adjust alpha for shading
+        theme(legend.title = element_blank())
+      
+      # Print and save the plot
+      print(scatter_plot)
+      #ggsave(filename = paste0("./figure/scatter_plots/", region, "_", full_score_var, ".png"),
+      #       plot = scatter_plot, width = 8, height = 6)
+    }
+  }
+}
+
+
+
+```
+
+
+# Correlation test
+```{r}
+library(dplyr)
+
+# Initialize a dataframe to store correlation results
+correlation_results <- data.frame(Region = character(),
+                                  MeasureType = character(),
+                                  ScoreType = character(),
+                                  Condition = character(),
+                                  Pearson_r = numeric(),
+                                  Pearson_p = numeric(),
+                                  Spearman_r = numeric(),
+                                  Spearman_p = numeric(),
+                                  stringsAsFactors = FALSE)
+
+# Loop over each region, each score variable, and each score type
+for (region in regions) {
+  for (score_var in score_vars) {
+    for (score_type in score_types) {
+
+      # Loop through each condition separately (LIFU and Sham)
+      for (condition in c("LIFU", "Sham")) {
+        
+        # Filter the long dataframe for the specific region, measure type, and condition
+        dat_plot <- dat_long %>%
+          filter(Region == region & MeasureType == score_type & ScoreType == score_var & Condition == condition)
+        
+        if (nrow(dat_plot) > 1) {  # Only calculate if there are sufficient data points
+          
+          # Pearson correlation
+          pearson_test <- cor.test(dat_plot$ConnectivityValue, dat_plot$ScoreValue, method = "pearson")
+          
+          # Spearman correlation
+          spearman_test <- cor.test(dat_plot$ConnectivityValue, dat_plot$ScoreValue, method = "spearman")
+          
+          # Append results to the dataframe
+          correlation_results <- rbind(correlation_results, 
+                                       data.frame(Region = region,
+                                                  MeasureType = score_type,
+                                                  ScoreType = score_var,
+                                                  Condition = condition,
+                                                  Pearson_r = pearson_test$estimate,
+                                                  Pearson_p = pearson_test$p.value,
+                                                  Spearman_r = spearman_test$estimate,
+                                                  Spearman_p = spearman_test$p.value,
+                                                  stringsAsFactors = FALSE))
+        }
+      }
+    }
+  }
+}
+
+# Save the correlation results to a CSV file
+#write.csv(correlation_results, file = "./table/correlation_results_connectivity.csv", row.names = FALSE)
+
+# Optional: Print out the correlation results to check
+print(correlation_results)
+
+
+```
+
+# Corr of connectivity : var d and ratio vs connectiivty post
+
+
+```{r}
+library(dplyr)
+
+# Initialize a dataframe to store correlation results
+correlation_results <- data.frame(Region = character(),
+                                  Condition = character(),
+                                  ScoreType = character(),
+                                  ConnectivityType = character(),
+                                  Pearson_r = numeric(),
+                                  Pearson_p = numeric(),
+                                  Spearman_r = numeric(),
+                                  Spearman_p = numeric(),
+                                  stringsAsFactors = FALSE)
+
+# List of regions
+regions <- c("vmPFC", "PCC")
+
+# List of score variables
+score_vars <- c("bsri_score", "panasx_negaffect_score", "panasx_posaffect_score", 
+                "panasx_fear_score", "panasx_hostility_score", "panasx_guilt_score", 
+                "panasx_sadness_score", "panasx_joviality_score", "panasx_selfassurance_score", 
+                "panasx_attentiveness_score", "panasx_shyness_score", "panasx_fatigue_score", 
+                "panasx_serenity_score", "panasx_surprise_score")
+
+# Loop over each region, each score variable, and each condition
+for (region in regions) {
+  for (score_var in score_vars) {
+    for (score_type in c("d", "ratio")) {
+      for (condition in c("LIFU", "Sham")) {
+        
+        # Filter the long dataframe for the specific score type, condition, and post connectivity
+        dat_score <- dat_long %>%
+          filter(Region == region & MeasureType == score_type & ScoreType == score_var & Condition == condition)
+        
+        dat_connectivity <- dat_long %>%
+          filter(Region == region & MeasureType == "post" & ScoreType == score_var & Condition == condition)
+        
+        if (nrow(dat_score) > 1 && nrow(dat_connectivity) > 1) {  # Only calculate if there are sufficient data points
+          
+          # Combine the score and connectivity dataframes based on the same subject ID (SID) and Condition
+          dat_combined <- merge(dat_score, dat_connectivity, by = c("SID", "Condition"))
+          
+          # Pearson correlation
+          pearson_test <- cor.test(dat_combined$ConnectivityValue.y, dat_combined$ScoreValue.x, method = "pearson")
+          
+          # Spearman correlation
+          spearman_test <- cor.test(dat_combined$ConnectivityValue.y, dat_combined$ScoreValue.x, method = "spearman")
+          
+          # Append results to the dataframe
+          correlation_results <- rbind(correlation_results, 
+                                       data.frame(Region = region,
+                                                  Condition = condition,
+                                                  ScoreType = paste0(score_var, "_", score_type),
+                                                  ConnectivityType = paste0(region, "_post"),
+                                                  Pearson_r = pearson_test$estimate,
+                                                  Pearson_p = pearson_test$p.value,
+                                                  Spearman_r = spearman_test$estimate,
+                                                  Spearman_p = spearman_test$p.value,
+                                                  stringsAsFactors = FALSE))
+        }
+      }
+    }
+  }
+}
+
+# Save the correlation results to a CSV file
+write.csv(correlation_results, file = "./table/correlation_results_d_ratio_vs_post_connectivity_by_condition.csv", row.names = FALSE)
+
+# Optional: Print out the correlation results to check
+print(correlation_results)
+
+
+```
+
+```{r}
+library(dplyr)
+
+# Initialize a dataframe to store correlation results
+correlation_results <- data.frame(Region = character(),
+                                  ScoreType = character(),
+                                  ConnectivityType = character(),
+                                  Pearson_r = numeric(),
+                                  Pearson_p = numeric(),
+                                  Spearman_r = numeric(),
+                                  Spearman_p = numeric(),
+                                  stringsAsFactors = FALSE)
+
+# List of regions
+regions <- c("vmPFC", "PCC")
+
+# List of score variables
+score_vars <- c("bsri_score", "panasx_negaffect_score", "panasx_posaffect_score", 
+                "panasx_fear_score", "panasx_hostility_score", "panasx_guilt_score", 
+                "panasx_sadness_score", "panasx_joviality_score", "panasx_selfassurance_score", 
+                "panasx_attentiveness_score", "panasx_shyness_score", "panasx_fatigue_score", 
+                "panasx_serenity_score", "panasx_surprise_score")
+
+# Loop over each region and each score variable
+for (region in regions) {
+  for (score_var in score_vars) {
+    for (score_type in c("d", "ratio")) {
+      
+      # Filter the long dataframe for the specific score type (d or ratio) and post connectivity
+      dat_score <- dat_long %>%
+        filter(Region == region & MeasureType == score_type & ScoreType == score_var)
+      
+      dat_connectivity <- dat_long %>%
+        filter(Region == region & MeasureType == "post" & ScoreType == score_var)
+      
+      if (nrow(dat_score) > 1 && nrow(dat_connectivity) > 1) {  # Only calculate if there are sufficient data points
+        
+        # Combine the score and connectivity dataframes based on the same subject ID (SID) and Condition
+        dat_combined <- merge(dat_score, dat_connectivity, by = c("SID", "Condition"))
+        
+        # Pearson correlation
+        pearson_test <- cor.test(dat_combined$ConnectivityValue.y, dat_combined$ScoreValue.x, method = "pearson")
+        
+        # Spearman correlation
+        spearman_test <- cor.test(dat_combined$ConnectivityValue.y, dat_combined$ScoreValue.x, method = "spearman")
+        
+        # Append results to the dataframe
+        correlation_results <- rbind(correlation_results, 
+                                     data.frame(Region = region,
+                                                ScoreType = paste0(score_var, "_", score_type),
+                                                ConnectivityType = paste0(region, "_post"),
+                                                Pearson_r = pearson_test$estimate,
+                                                Pearson_p = pearson_test$p.value,
+                                                Spearman_r = spearman_test$estimate,
+                                                Spearman_p = spearman_test$p.value,
+                                                stringsAsFactors = FALSE))
+      }
+    }
+  }
+}
+
+
+
+# Save the correlation results to a CSV file
+write.csv(correlation_results, file = "./table/correlation_results_d_ratio_vs_post_conectivity.csv", row.names = FALSE)
+
+# Optional: Print out the correlation results to check
+print(correlation_results)
+
+```
+
+

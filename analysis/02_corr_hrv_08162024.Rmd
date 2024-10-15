@@ -1,0 +1,771 @@
+---
+title: ""
+output: html_document
+date: "2024-08-16"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+# Load necessary libraries
+library(dplyr)
+library(tidyr)
+library(readr)
+
+dat1 <- read.csv('./data/demo.csv')
+dat2 <- read.csv('./data/MADRS.csv')
+dat3 <- read.csv('./data/BSRI.csv')
+dat4 <- read.csv("./data/PANAS.csv")
+
+#Remove the empty rows
+dat1 <- dat1[!is.na(dat1$SID),]
+
+# Rename the column
+dat2 <- rename(dat2, SID = record_id)
+dat3 <- rename(dat3, SID = record_id)
+dat4 <- rename(dat4, SID = record_id)
+
+dat <- merge(dat1, dat2, by.x = "SID")
+dat <- left_join(dat, dat3, by.x = "SID")
+dat <- left_join(dat, dat4, by.x = "SID")
+#dat <- dat %>% filter(!(SID %in% c("AV503", "AW090", "BB898","BM110", "BR717", "BU113", "BU206", "BU640", "BU693", "BU894")))
+#dat <- dat %>% filter(!(SID %in% c("BM110", "BR717", "BU113", "BU206", "BU640", "BU693", "BU894")))
+#write.csv(dat, 'test.csv')
+
+dat <- dat %>%
+    mutate(redcap_event_name = ifelse(Order == "A",
+                                      case_when(
+                                          redcap_event_name == "visit_1_day_1_pre_arm_1" ~ "FUS_pre",
+                                          redcap_event_name == "visit_1_day_1_post_arm_1" ~ "FUS_post",
+                                          redcap_event_name == "visit_3_day144_pre_arm_1" ~ "Sham_pre",
+                                          redcap_event_name == "visit_3_day144_pos_arm_1" ~ "Sham_post",
+                                          redcap_event_name == "screening_day_7_to_arm_1" ~ "Screening",
+                                          redcap_event_name == "visit_2_day74_arm_1" ~ "V2",
+                                          redcap_event_name == "visit_4_day214_arm_1" ~ "V4",
+                                          TRUE ~ redcap_event_name),
+                                      ifelse(Order == "B",
+                                             case_when(
+                                                 redcap_event_name == "visit_1_day_1_pre_arm_1" ~ "Sham_pre",
+                                                 redcap_event_name == "visit_1_day_1_post_arm_1" ~ "Sham_post",
+                                                 redcap_event_name == "visit_3_day144_pre_arm_1" ~ "FUS_pre",
+                                                 redcap_event_name == "visit_3_day144_pos_arm_1" ~ "FUS_post",
+                                                 redcap_event_name == "screening_day_7_to_arm_1" ~ "Screening",
+                                                 redcap_event_name == "visit_2_day74_arm_1" ~ "V2",
+                                                 redcap_event_name == "visit_4_day214_arm_1" ~ "V4",
+                                                 TRUE ~ redcap_event_name),
+                                             redcap_event_name)))
+
+# Change the factor order
+dat$redcap_event_name <- factor(dat$redcap_event_name, levels = c("Screening", "FUS_pre", "FUS_post", "V2", "Sham_pre", "Sham_post", "V4"))
+dat$Group <- factor(dat$Group, levels = c("High", "Low", "HC"))
+
+#Remove V2, Screening, V4
+dat <- filter(dat, redcap_event_name != "V2")
+dat <- filter(dat, redcap_event_name != "Screening")
+dat <- filter(dat, redcap_event_name != "V4")            
+
+# Create a new group where High and Low are combined into MDD
+dat$Group2 <- ifelse(dat$Group %in% c("High", "Low"), "MDD", "HC")
+
+dat$Group2 <- factor(dat$Group2, levels = c("MDD", "HC"))
+
+# Creat a new time where pre and post are combined regardless of FUS or Sham
+dat$redcap_event_name2 <- ifelse(dat$redcap_event_name %in% c("FUS_pre", "Sham_pre"), "Pre", "Post")
+
+dat$redcap_event_name2 <- factor(dat$redcap_event_name2, levels = c("Pre", "Post"))
+
+
+summary_dat <- dat %>%
+  group_by(Group2, redcap_event_name) %>%
+  summarize(
+    mean_madrs_score = mean(madrs_score, na.rm = TRUE),
+    sd_madrs_score = sd(madrs_score, na.rm = TRUE)
+  )
+
+#MDD ONLY
+dat <- dat %>% filter(!(Group %in% c("HC")))
+
+
+```
+
+# add hrv data
+```{r}
+
+dat5 <- read.csv("./data/MDD_Rest1_usable_clusters_betavalues_Tha_R_8_2.csv")
+
+dat <- left_join(dat, dat5, by.x = "SID")
+
+
+# Load the HRV data
+hrv_data <- read_csv("./data/hrv_analysis_results_excludedAV503BU206.csv")
+
+# Clean and preprocess the HRV data
+# Remove "sub-" prefix from Subject IDs
+hrv_data <- hrv_data %>%
+  mutate(Subject = gsub("sub-", "", Subject))
+
+# Clean and preprocess the HRV data
+hrv_data <- hrv_data %>%
+  mutate(Subject = gsub("sub-", "", Subject)) %>%
+  mutate(redcap_event_name = case_when(
+    Session == "active" & Time == "Pre" ~ "FUS_pre",
+    Session == "active" & Time == "Post" ~ "FUS_post",
+    Session == "active" & Time == "On" ~ "FUS_on",  
+    Session == "sham" & Time == "Pre" ~ "Sham_pre",
+    Session == "sham" & Time == "Post" ~ "Sham_post",
+    Session == "sham" & Time == "On" ~ "Sham_on",
+    TRUE ~ NA_character_
+  ))
+
+# Merge HRV data with connectivity data on the SID and redcap_event_name
+dat <- left_join(dat, hrv_data, by = c("SID" = "Subject", "redcap_event_name"))
+
+# Save the merged data to a CSV file if needed
+#write.csv(merged_data, file = "./data/merged_data_hrv_connectivity.csv", row.names = FALSE)
+
+
+```
+
+#Calculate change ratio
+```{r}
+library(tidyr)
+library(dplyr)
+
+# List of score variables to process
+score_vars <- c("bsri_score", "panasx_negaffect_score", "panasx_posaffect_score", "panasx_fear_score", 
+                "panasx_hostility_score", "panasx_guilt_score", "panasx_sadness_score", 
+                "panasx_joviality_score", "panasx_selfassurance_score", "panasx_attentiveness_score", 
+                "panasx_shyness_score", "panasx_fatigue_score", "panasx_serenity_score", 
+                "panasx_surprise_score")
+
+# Define clusters
+clusters <- c("vmPFC_Base_rest_r1", "vmPFC_FUS_rest_r1", "vmPFC_Sham_rest_r1", "PCC_Base_rest_r1", "PCC_FUS_rest_r1", "PCC_Sham_rest_r1")
+
+# Define HRV variables
+hrv_vars <- c("SDNN", "pNN50", "SDSD", "rMSSD", "IRRR", "MADRR", "TINN", "HRVi", "ULF", "VLF", "LF", "HF", "LFHF")
+
+# Initialize an empty dataframe to store the final combined results
+dat_combined <- dat %>%
+  filter(redcap_event_name %in% c("FUS_pre")) %>%
+  select(SID, Group, Age, Sex, Order, Race, Hispanic, all_of(clusters))  # Selecting necessary columns to start
+
+# Process each score variable
+for (var in score_vars) {
+  # Spread for FUS
+  spread_fus <- dat %>%
+    select(SID, redcap_event_name, !!sym(var)) %>%
+    filter(redcap_event_name %in% c("FUS_post", "FUS_pre")) %>%
+    spread(key = redcap_event_name, value = !!sym(var))
+  
+  # Rename FUS_pre and FUS_post to variable_name_pre and variable_name_post
+  spread_fus <- spread_fus %>%
+    rename(!!paste0(var, "_pre_fus") := FUS_pre,
+           !!paste0(var, "_post_fus") := FUS_post) %>%
+    mutate(!!paste0(var, "_d_fus") := !!sym(paste0(var, "_post_fus")) - !!sym(paste0(var, "_pre_fus")),
+           !!paste0(var, "_ratio_fus") := (!!sym(paste0(var, "_post_fus")) - !!sym(paste0(var, "_pre_fus"))) / !!sym(paste0(var, "_pre_fus")))
+  
+  # Spread for Sham
+  spread_sham <- dat %>%
+    select(SID, redcap_event_name, !!sym(var)) %>%
+    filter(redcap_event_name %in% c("Sham_post", "Sham_pre")) %>%
+    spread(key = redcap_event_name, value = !!sym(var))
+  
+  # Rename Sham_pre and Sham_post to variable_name_pre and variable_name_post
+  spread_sham <- spread_sham %>%
+    rename(!!paste0(var, "_pre_sham") := Sham_pre,
+           !!paste0(var, "_post_sham") := Sham_post) %>%
+    mutate(!!paste0(var, "_d_sham") := !!sym(paste0(var, "_post_sham")) - !!sym(paste0(var, "_pre_sham")),
+           !!paste0(var, "_ratio_sham") := (!!sym(paste0(var, "_post_sham")) - !!sym(paste0(var, "_pre_sham"))) / !!sym(paste0(var, "_pre_sham")))
+  
+  # Join with dat_FUS
+  dat_FUS <- dat %>%
+    filter(redcap_event_name %in% c("FUS_pre")) %>%
+    left_join(spread_fus[, c("SID", paste0(var, "_d_fus"), paste0(var, "_ratio_fus"), paste0(var, "_pre_fus"), paste0(var, "_post_fus"))], by = "SID") %>%
+    select(-c("redcap_event_name"))
+  
+  # Join with dat_Sham
+  dat_Sham <- dat %>%
+    filter(redcap_event_name %in% c("Sham_pre")) %>%
+    left_join(spread_sham[, c("SID", paste0(var, "_d_sham"), paste0(var, "_ratio_sham"), paste0(var, "_pre_sham"), paste0(var, "_post_sham"))], by = "SID") %>%
+    select(-c("redcap_event_name"))
+  
+  # Combine FUS and Sham
+  dat_ratio <- dat_FUS %>% 
+    left_join(dat_Sham[, c("SID", paste0(var, "_d_sham"), paste0(var, "_ratio_sham"), paste0(var, "_pre_sham"), paste0(var, "_post_sham"))], by ="SID") 
+  
+  # Merge the ratio data with the main dat_combined dataframe
+  dat_combined <- dat_combined %>%
+    left_join(dat_ratio[, c("SID", paste0(var, "_d_fus"), paste0(var, "_d_sham"),
+                                 paste0(var, "_ratio_fus"), paste0(var, "_ratio_sham"),
+                                 paste0(var, "_pre_fus"), paste0(var, "_post_fus"),
+                                 paste0(var, "_pre_sham"), paste0(var, "_post_sham"))], by ="SID")
+}
+
+# Process each HRV variable
+for (var in hrv_vars) {
+  # Spread for FUS
+  spread_fus <- merged_data %>%
+    select(SID, redcap_event_name, !!sym(var)) %>%
+    filter(redcap_event_name %in% c("FUS_post", "FUS_pre")) %>%
+    spread(key = redcap_event_name, value = !!sym(var))
+  
+  # Rename FUS_pre and FUS_post to variable_name_pre and variable_name_post
+  spread_fus <- spread_fus %>%
+    rename(!!paste0(var, "_pre_fus") := FUS_pre,
+           !!paste0(var, "_post_fus") := FUS_post) %>%
+    mutate(!!paste0(var, "_d_fus") := !!sym(paste0(var, "_post_fus")) - !!sym(paste0(var, "_pre_fus")),
+           !!paste0(var, "_ratio_fus") := (!!sym(paste0(var, "_post_fus")) - !!sym(paste0(var, "_pre_fus"))) / !!sym(paste0(var, "_pre_fus")))
+  
+  # Spread for Sham
+  spread_sham <- merged_data %>%
+    select(SID, redcap_event_name, !!sym(var)) %>%
+    filter(redcap_event_name %in% c("Sham_post", "Sham_pre")) %>%
+    spread(key = redcap_event_name, value = !!sym(var))
+  
+  # Rename Sham_pre and Sham_post to variable_name_pre and variable_name_post
+  spread_sham <- spread_sham %>%
+    rename(!!paste0(var, "_pre_sham") := Sham_pre,
+           !!paste0(var, "_post_sham") := Sham_post) %>%
+    mutate(!!paste0(var, "_d_sham") := !!sym(paste0(var, "_post_sham")) - !!sym(paste0(var, "_pre_sham")),
+           !!paste0(var, "_ratio_sham") := (!!sym(paste0(var, "_post_sham")) - !!sym(paste0(var, "_pre_sham"))) / !!sym(paste0(var, "_pre_sham")))
+  
+  # Join with dat_FUS
+  dat_FUS <- merged_data %>%
+    filter(redcap_event_name %in% c("FUS_pre")) %>%
+    left_join(spread_fus[, c("SID", paste0(var, "_d_fus"), paste0(var, "_ratio_fus"), paste0(var, "_pre_fus"), paste0(var, "_post_fus"))], by = "SID") %>%
+    select(-c("redcap_event_name"))
+  
+  # Join with dat_Sham
+  dat_Sham <- merged_data %>%
+    filter(redcap_event_name %in% c("Sham_pre")) %>%
+    left_join(spread_sham[, c("SID", paste0(var, "_d_sham"), paste0(var, "_ratio_sham"), paste0(var, "_pre_sham"), paste0(var, "_post_sham"))], by = "SID") %>%
+    select(-c("redcap_event_name"))
+  
+  # Combine FUS and Sham
+  dat_ratio <- dat_FUS %>% 
+    left_join(dat_Sham[, c("SID", paste0(var, "_d_sham"), paste0(var, "_ratio_sham"), paste0(var, "_pre_sham"), paste0(var, "_post_sham"))], by ="SID") 
+  
+  # Merge the ratio data with the main dat_combined dataframe
+  dat_combined <- dat_combined %>%
+    left_join(dat_ratio[, c("SID", 
+                            paste0(var, "_d_fus"), 
+                            paste0(var, "_d_sham"),
+                            paste0(var, "_ratio_fus"), 
+                            paste0(var, "_ratio_sham"),
+                            paste0(var, "_pre_fus"), 
+                            paste0(var, "_post_fus"),
+                            paste0(var, "_pre_sham"), 
+                            paste0(var, "_post_sham"))], 
+              by = "SID")
+}
+
+
+# Process each cluster variable and calculate differences and ratios
+dat_clusters <- dat %>%
+  filter(redcap_event_name %in% c("FUS_pre", "FUS_post", "Sham_pre", "Sham_post")) %>%
+  select(SID, starts_with("vmPFC"), starts_with("PCC"))
+
+dat_clusters <- dat_clusters %>%
+  group_by(SID) %>%
+  mutate(
+    vmPFC_base = vmPFC_Base_rest_r1,
+    vmPFC_post_fus = vmPFC_FUS_rest_r1,
+    vmPFC_d_fus = vmPFC_FUS_rest_r1 - vmPFC_Base_rest_r1,
+    vmPFC_ratio_fus = (vmPFC_FUS_rest_r1 - vmPFC_Base_rest_r1) / vmPFC_Base_rest_r1,
+    vmPFC_post_sham = vmPFC_Sham_rest_r1,
+    vmPFC_d_sham = vmPFC_Sham_rest_r1 - vmPFC_Base_rest_r1,
+    vmPFC_ratio_sham = (vmPFC_Sham_rest_r1 - vmPFC_Base_rest_r1) / vmPFC_Base_rest_r1,
+    PCC_base = PCC_Base_rest_r1,
+    PCC_post_fus = PCC_FUS_rest_r1,
+    PCC_d_fus = PCC_FUS_rest_r1 - PCC_Base_rest_r1,
+    PCC_ratio_fus = (PCC_FUS_rest_r1 - PCC_Base_rest_r1) / PCC_Base_rest_r1,
+    PCC_post_sham = PCC_Sham_rest_r1,
+    PCC_d_sham = PCC_Sham_rest_r1 - PCC_Base_rest_r1,
+    PCC_ratio_sham = (PCC_Sham_rest_r1 - PCC_Base_rest_r1) / PCC_Base_rest_r1
+    
+  ) %>%
+  ungroup() %>%
+  # Replace -Inf values with zero
+  mutate(across(contains("ratio"), ~replace(., is.infinite(.), NA))) %>%
+  select(SID, vmPFC_base, vmPFC_post_fus, vmPFC_d_fus, vmPFC_ratio_fus, vmPFC_post_sham, vmPFC_d_sham, vmPFC_ratio_sham, 
+         PCC_base, PCC_post_fus, PCC_d_fus, PCC_ratio_fus, PCC_post_sham, PCC_d_sham, PCC_ratio_sham) %>%
+  distinct(SID, .keep_all = TRUE)  # Remove duplicate rows by SID
+
+# Left join cluster variables into dat_combined
+dat_combined <- dat_combined %>%
+  left_join(dat_clusters, by = "SID")
+
+
+
+# Save the final combined dataframe 
+#write_csv(dat_combined, "./data/dat_scores_with_clusters_hrv.csv")
+
+
+
+
+```
+
+#Long format
+```{r}
+
+library(tidyr)
+library(dplyr)
+
+# Define score variables
+score_vars <- c("bsri_score", "panasx_negaffect_score", "panasx_posaffect_score", "panasx_fear_score", 
+                "panasx_hostility_score", "panasx_guilt_score", "panasx_sadness_score", 
+                "panasx_joviality_score", "panasx_selfassurance_score", "panasx_attentiveness_score", 
+                "panasx_shyness_score", "panasx_fatigue_score", "panasx_serenity_score", 
+                "panasx_surprise_score")
+
+# Define HRV variables
+hrv_vars <- c("SDNN", "pNN50", "SDSD", "rMSSD", "IRRR", "MADRR", "TINN", "HRVi", "ULF", "VLF", "LF", "HF", "LFHF")
+
+# Define regions
+regions <- c("vmPFC", "PCC")
+
+# Pivot the data to create long format for score variables
+dat_long_scores <- dat_combined %>%
+  pivot_longer(cols = starts_with("bsri_score") | starts_with("panasx_"), 
+               names_to = c("ScoreType", "MeasureType", "Condition"),
+               names_pattern = "(.*)_(d|ratio|post|pre)_(fus|sham)",
+               values_drop_na = TRUE) %>%
+  mutate(Condition = recode(Condition,
+                            "fus" = "LIFU",
+                            "sham" = "Sham"))
+
+# Pivot the data to create long format for HRV variables
+dat_long_hrv <- dat_combined %>%
+  pivot_longer(cols = starts_with("SDNN") | starts_with("pNN50") | starts_with("SDSD") | 
+                     starts_with("rMSSD") | starts_with("IRRR") | starts_with("MADRR") | 
+                     starts_with("TINN") | starts_with("HRVi") | starts_with("ULF") | 
+                     starts_with("VLF") | starts_with("LF") | starts_with("HF") | 
+                     starts_with("LFHF"),
+               names_to = c("HRVType", "MeasureType", "Condition"),
+               names_pattern = "(.*)_(d|ratio|post|pre)_(fus|sham)",
+               values_drop_na = TRUE) %>%
+  mutate(Condition = recode(Condition,
+                            "fus" = "LIFU",
+                            "sham" = "Sham"))
+
+# Pivot the data to create long format for region variables, excluding vmPFC_base and PCC_base
+dat_long_regions <- dat_combined %>%
+  pivot_longer(cols = matches("^(vmPFC|PCC)_(d|ratio|post)_(fus|sham)$"),
+               names_to = c("Region", "MeasureType", "Condition"),
+               names_pattern = "(vmPFC|PCC)_(d|ratio|post)_(fus|sham)",
+               values_drop_na = TRUE) %>%
+  mutate(Condition = recode(Condition,
+                            "fus" = "LIFU",
+                            "sham" = "Sham"))
+
+# Join the long-format scores and regions, matching only the relevant columns
+dat_long <- dat_long_scores %>%
+  inner_join(dat_long_regions, by = c("SID", "Group", "Age", "Sex", "Condition", "MeasureType")) %>%
+  inner_join(dat_long_hrv, by = c("SID", "Group", "Age", "Sex", "Condition", "MeasureType")) %>%
+  select(SID, Group, Age, Sex, Condition, Region, HRVType, ScoreType, MeasureType, value.x, value.y, value) %>%
+  rename(ScoreValue = value.x, ConnectivityValue = value.y, HRVValue = value)
+
+# Remove rows where either ScoreValue, ConnectivityValue, or HRVValue is NA
+#dat_long <- dat_long %>%
+#  filter(!is.na(ScoreValue) & !is.na(ConnectivityValue) & !is.na(HRVValue))
+
+
+
+
+
+
+
+
+```
+
+
+#Scatter plot all
+```{r}
+library(ggplot2)
+library(dplyr)
+
+# List of regions
+regions <- c("vmPFC", "PCC")
+
+# List of HRV variables
+hrv_vars <- c("SDNN", "pNN50", "SDSD", "rMSSD", "IRRR", "MADRR", "TINN", "HRVi", "ULF", "VLF", "LF", "HF", "LFHF")
+
+# List of HRV types
+hrv_types <- c("d", "ratio", "post")
+
+# Create a directory to save the images
+dir.create("./figure/scatter_plots_hrv", showWarnings = FALSE)
+
+# Loop over each region, each HRV variable, and each HRV type
+for (region in regions) {
+  for (hrv_var in hrv_vars) {
+    for (hrv_type in hrv_types) {
+      
+      # Filter the long dataframe for the specific region and measure type
+      dat_plot <- dat_long %>%
+        filter(Region == region & MeasureType == hrv_type & HRVType == hrv_var)
+      
+      # Define the y-axis label based on the HRV variable and HRV type
+      base_y_label <- switch(hrv_var,
+                             "SDNN" = "SDNN Changes",
+                             "pNN50" = "pNN50 Changes",
+                             "SDSD" = "SDSD Changes",
+                             "rMSSD" = "rMSSD Changes",
+                             "IRRR" = "IRRR Changes",
+                             "MADRR" = "MADRR Changes",
+                             "TINN" = "TINN Changes",
+                             "HRVi" = "HRVi Changes",
+                             "ULF" = "ULF Changes",
+                             "VLF" = "VLF Changes",
+                             "LF" = "LF Changes",
+                             "HF" = "HF Changes",
+                             "LFHF" = "LF/HF Ratio Changes")
+
+      y_label <- paste(base_y_label, "(Post-Pre)")
+      if (hrv_type == "ratio") {
+        y_label <- paste(base_y_label, "(Post-Pre)/Pre")
+      } else if (hrv_type == "post") {
+        y_label <- base_y_label
+      }
+      
+      # Define the x-axis label based on the region
+      x_label <- ifelse(region == "vmPFC",
+                        "Thalamus-vmPFC/ACC Connectivity",
+                        "Thalamus-PCC Connectivity")
+      
+      # Construct the full HRV variable name for saving
+      full_hrv_var <- paste0(hrv_var, "_", hrv_type)
+
+      # Create the scatter plot
+      scatter_plot <- ggplot(dat_plot, aes(x = ConnectivityValue, y = HRVValue, color = Condition)) +
+        geom_point(aes(shape = Condition), size = 3, alpha = 0.8) +
+        geom_smooth(method = "lm", se = TRUE, aes(fill = Condition), alpha = 0.1) + # Adding linear regression line and confidence interval
+        theme_linedraw() +
+        labs(title = "",
+             x = x_label,
+             y = y_label) +
+        scale_color_manual(values = c("LIFU" = "darkgreen", "Sham" = "orange")) +
+        scale_fill_manual(values = c("LIFU" = scales::alpha("darkgreen", 0.1), "Sham" = scales::alpha("orange", 0.1))) + # adjust alpha for shading
+        theme(legend.title = element_blank())
+      
+      # Print and save the plot
+      print(scatter_plot)
+      ggsave(filename = paste0("./figure/scatter_plots_hrv/", region, "_", full_hrv_var, ".png"),
+             plot = scatter_plot, width = 8, height = 6)
+    }
+  }
+}
+
+
+```
+
+# Correlation test
+```{r}
+library(dplyr)
+
+# Initialize a dataframe to store correlation results
+correlation_results_hrv <- data.frame(Region = character(),
+                                      MeasureType = character(),
+                                      HRVType = character(),
+                                      Condition = character(),
+                                      Pearson_r = numeric(),
+                                      Pearson_p = numeric(),
+                                      Spearman_r = numeric(),
+                                      Spearman_p = numeric(),
+                                      stringsAsFactors = FALSE)
+
+# List of regions
+regions <- c("vmPFC", "PCC")
+
+# List of HRV variables
+hrv_vars <- c("SDNN", "pNN50", "SDSD", "rMSSD", "IRRR", "MADRR", "TINN", "HRVi", "ULF", "VLF", "LF", "HF", "LFHF")
+
+# List of HRV types
+hrv_types <- c("d", "ratio", "post")
+
+# Filter out the duplicated rows based on unique combinations
+dat_long_hrv_filtered <- dat_long %>%
+  distinct(SID, Group, Age, Sex, Condition, Region, HRVType, MeasureType, .keep_all = TRUE)
+
+# Loop over each region, each HRV variable, and each HRV type
+for (region in regions) {
+  for (hrv_var in hrv_vars) {
+    for (hrv_type in hrv_types) {
+
+      # Loop through each condition separately (LIFU and Sham)
+      for (condition in c("LIFU", "Sham")) {
+        
+        # Filter the long dataframe for the specific region, measure type, and condition
+        dat_plot <- dat_long_hrv_filtered %>%
+          filter(Region == region & MeasureType == hrv_type & HRVType == hrv_var & Condition == condition)
+        
+        if (nrow(dat_plot) > 1) {  # Only calculate if there are sufficient data points
+          
+          # Pearson correlation
+          pearson_test <- cor.test(dat_plot$ConnectivityValue, dat_plot$HRVValue, method = "pearson")
+          
+          # Spearman correlation
+          spearman_test <- cor.test(dat_plot$ConnectivityValue, dat_plot$HRVValue, method = "spearman")
+          
+          # Append results to the dataframe
+          correlation_results_hrv <- rbind(correlation_results_hrv, 
+                                           data.frame(Region = region,
+                                                      MeasureType = hrv_type,
+                                                      HRVType = hrv_var,
+                                                      Condition = condition,
+                                                      Pearson_r = pearson_test$estimate,
+                                                      Pearson_p = pearson_test$p.value,
+                                                      Spearman_r = spearman_test$estimate,
+                                                      Spearman_p = spearman_test$p.value,
+                                                      stringsAsFactors = FALSE))
+        }
+      }
+    }
+  }
+}
+
+# Save the correlation results to a CSV file
+write.csv(correlation_results_hrv, file = "./table/correlation_results_connectivity_hrv.csv", row.names = FALSE)
+
+# Optional: Print out the correlation results to check
+print(correlation_results_hrv)
+
+
+
+
+```
+# ratio and d vs post
+```{r}
+library(ggplot2)
+library(dplyr)
+
+# List of regions
+regions <- c("vmPFC", "PCC")
+
+# List of HRV variables
+hrv_vars <- c("SDNN", "pNN50", "SDSD", "rMSSD", "IRRR", "MADRR", "TINN", "HRVi", "ULF", "VLF", "LF", "HF", "LFHF")
+
+# List of HRV types to plot against post-connectivity
+hrv_types <- c("d", "ratio")
+
+# Create a directory to save the images
+dir.create("./figure/scatter_plots_hrv", showWarnings = FALSE)
+
+# Loop over each region, each HRV variable, and each HRV type
+for (region in regions) {
+  for (hrv_var in hrv_vars) {
+    for (hrv_type in hrv_types) {
+      
+      # Filter the long dataframe for the specific region, HRV variable, and HRV type
+      dat_plot <- dat_long %>%
+        filter(Region == region & MeasureType == hrv_type & HRVType == hrv_var)
+      
+      # Define the y-axis label based on the HRV variable and HRV type
+      base_y_label <- switch(hrv_var,
+                             "SDNN" = "SDNN Changes",
+                             "pNN50" = "pNN50 Changes",
+                             "SDSD" = "SDSD Changes",
+                             "rMSSD" = "rMSSD Changes",
+                             "IRRR" = "IRRR Changes",
+                             "MADRR" = "MADRR Changes",
+                             "TINN" = "TINN Changes",
+                             "HRVi" = "HRVi Changes",
+                             "ULF" = "ULF Changes",
+                             "VLF" = "VLF Changes",
+                             "LF" = "LF Changes",
+                             "HF" = "HF Changes",
+                             "LFHF" = "LF/HF Ratio Changes")
+
+      y_label <- paste(base_y_label, if (hrv_type == "ratio") "(Post-Pre)/Pre" else "(Post-Pre)")
+      
+      # Define the x-axis label based on the region
+      x_label <- ifelse(region == "vmPFC",
+                        "Thalamus-vmPFC/ACC Connectivity",
+                        "Thalamus-PCC Connectivity")
+      
+      # Construct the full HRV variable name for saving
+      full_hrv_var <- paste0(hrv_var, "_", hrv_type)
+
+      # Create the scatter plot
+      scatter_plot <- ggplot(dat_plot, aes(x = ConnectivityValue, y = HRVValue, color = Condition)) +
+        geom_point(aes(shape = Condition), size = 3, alpha = 0.8) +
+        geom_smooth(method = "lm", se = TRUE, aes(fill = Condition), alpha = 0.1) + # Adding linear regression line and confidence interval
+        theme_linedraw() +
+        labs(title = paste(region, "-", hrv_var, "Correlation at Post"),
+             x = x_label,
+             y = y_label) +
+        scale_color_manual(values = c("LIFU" = "darkgreen", "Sham" = "orange")) +
+        scale_fill_manual(values = c("LIFU" = scales::alpha("darkgreen", 0.1), "Sham" = scales::alpha("orange", 0.1))) + # adjust alpha for shading
+        theme(legend.title = element_blank())
+      
+      # Print and save the plot
+      print(scatter_plot)
+      ggsave(filename = paste0("./figure/scatter_plots_hrv/", region, "_", full_hrv_var, ".png"),
+             plot = scatter_plot, width = 8, height = 6)
+    }
+  }
+}
+
+
+
+```
+
+
+#PLOT
+```{r}
+
+library(dplyr)
+library(ggplot2)
+
+# Create a directory to save the scatter plots
+dir.create("./figure/scatter_plots_hrv_vs_connectivity", showWarnings = FALSE)
+
+# Initialize a dataframe to store correlation results
+correlation_results <- data.frame(Region = character(),
+                                  HRVType = character(),
+                                  ConnectivityType = character(),
+                                  Condition = character(),
+                                  Pearson_r = numeric(),
+                                  Pearson_p = numeric(),
+                                  Spearman_r = numeric(),
+                                  Spearman_p = numeric(),
+                                  stringsAsFactors = FALSE)
+
+# List of regions
+regions <- c("vmPFC", "PCC")
+
+# List of HRV variables
+hrv_vars <- c("SDNN", "pNN50", "SDSD", "rMSSD", "IRRR", "MADRR", "TINN", "HRVi", "ULF", "VLF", "LF", "HF", "LFHF")
+
+# Filter out the duplicated rows based on unique combinations
+dat_long_hrv_filtered <- dat_long %>%
+  distinct(SID, Group, Age, Sex, Condition, Region, HRVType, MeasureType, .keep_all = TRUE)
+
+# Loop over each region and each HRV variable
+for (region in regions) {
+  for (hrv_var in hrv_vars) {
+    for (hrv_type in c("d", "ratio")) {
+      
+      # Filter the long dataframe for the specific HRV type (d or ratio) and region
+      dat_hrv <- dat_long_hrv_filtered %>%
+        filter(Region == region & MeasureType == hrv_type & HRVType == hrv_var)
+      
+      dat_connectivity <- dat_long_hrv_filtered %>%
+        filter(Region == region & MeasureType == "post" & HRVType == hrv_var)
+      
+      if (nrow(dat_hrv) > 1 && nrow(dat_connectivity) > 1) {  # Only calculate if there are sufficient data points
+        
+        # Combine the HRV and connectivity dataframes based on the same subject ID (SID) and Condition
+        dat_combined <- merge(dat_hrv, dat_connectivity, by = c("SID", "Condition"))
+        
+        # Create a scatter plot for both LIFU and Sham conditions in the same plot
+        scatter_plot <- ggplot(dat_combined, aes(x = ConnectivityValue.y, y = HRVValue.x, color = Condition)) +
+          geom_point(aes(shape = Condition), size = 3, alpha = 0.8) +
+          geom_smooth(method = "lm", se = TRUE, aes(fill = Condition), alpha = 0.1) +
+          theme_linedraw() +
+          labs(title = paste("Scatter plot of", hrv_var, "vs", region, "Connectivity"),
+               x = paste0(region, " Connectivity"),
+               y = paste0(hrv_var, " (", hrv_type, ")"),
+               color = "Condition") +
+          scale_color_manual(values = c("LIFU" = "darkgreen", "Sham" = "orange")) +
+          scale_fill_manual(values = c("LIFU" = scales::alpha("darkgreen", 0.1), "Sham" = scales::alpha("orange", 0.1))) +
+          theme(legend.title = element_blank())
+        
+        # Save the scatter plot
+        ggsave(filename = paste0("./figure/scatter_plots_hrv_vs_connectivity/", region, "_", hrv_var, "_", hrv_type, ".png"),
+               plot = scatter_plot, width = 8, height = 6)
+        
+        # Pearson and Spearman correlations are calculated separately for each condition
+        for (condition in c("LIFU", "Sham")) {
+          dat_condition <- dat_combined %>% filter(Condition == condition)
+          
+          if (nrow(dat_condition) > 1) {  # Only calculate if there are sufficient data points
+            # Pearson correlation
+            pearson_test <- cor.test(dat_condition$ConnectivityValue.y, dat_condition$HRVValue.x, method = "pearson")
+            
+            # Spearman correlation
+            spearman_test <- cor.test(dat_condition$ConnectivityValue.y, dat_condition$HRVValue.x, method = "spearman")
+            
+            # Append results to the dataframe
+            correlation_results <- rbind(correlation_results, 
+                                         data.frame(Region = region,
+                                                    HRVType = paste0(hrv_var, "_", hrv_type),
+                                                    ConnectivityType = paste0(region, "_post"),
+                                                    Condition = condition,
+                                                    Pearson_r = pearson_test$estimate,
+                                                    Pearson_p = pearson_test$p.value,
+                                                    Spearman_r = spearman_test$estimate,
+                                                    Spearman_p = spearman_test$p.value,
+                                                    stringsAsFactors = FALSE))
+          }
+        }
+      }
+    }
+  }
+}
+
+# Save the correlation results to a CSV file
+write.csv(correlation_results, file = "./table/correlation_results_hrv_vs_post_connectivity_lifu_sham.csv", row.names = FALSE)
+
+# Optional: Print out the correlation results to check
+print(correlation_results)
+
+
+
+
+
+```
+
+
+
+
+```{r}
+# Define the HRV variables and connectivity clusters for correlation analysis
+hrv_vars <- c("SDNN", "pNN50", "SDSD", "rMSSD", "IRRR", "MADRR",	"TINN",	"HRVi", "ULF", "VLF", "LF", "HF", "LFHF")
+connectivity_vars <- c("vmPFC_Base_rest_r1", "vmPFC_FUS_rest_r1", "vmPFC_Sham_rest_r1", 
+              "PCC_Base_rest_r1", "PCC_FUS_rest_r1", "PCC_Sham_rest_r1")
+
+# Initialize a dataframe to store correlation results
+correlation_results <- data.frame(Region = character(),
+                                  HRV_Var = character(),
+                                  Pearson_r = numeric(),
+                                  Pearson_p = numeric(),
+                                  Spearman_r = numeric(),
+                                  Spearman_p = numeric(),
+                                  stringsAsFactors = FALSE)
+
+# Perform correlation analysis
+for (region in connectivity_vars) {
+  for (hrv_var in hrv_vars) {
+    
+    # Filter data for non-missing values
+    analysis_data <- dat %>%
+      filter(!is.na(get(region)) & !is.na(get(hrv_var)))
+    
+    # Perform Pearson correlation
+    pearson_test <- cor.test(analysis_data[[region]], analysis_data[[hrv_var]], method = "pearson")
+    
+    # Perform Spearman correlation
+    spearman_test <- cor.test(analysis_data[[region]], analysis_data[[hrv_var]], method = "spearman")
+    
+    # Store the results
+    correlation_results <- rbind(correlation_results, 
+                                 data.frame(Region = region,
+                                            HRV_Var = hrv_var,
+                                            Pearson_r = pearson_test$estimate,
+                                            Pearson_p = pearson_test$p.value,
+                                            Spearman_r = spearman_test$estimate,
+                                            Spearman_p = spearman_test$p.value,
+                                            stringsAsFactors = FALSE))
+  }
+}
+
+# Save the correlation results to a CSV file
+write.csv(correlation_results, file = "./table/correlation_results_hrv_connectivity.csv", row.names = FALSE)
+
+# Optional: Print out the correlation results to check
+print(correlation_results)
+
+```

@@ -1,0 +1,396 @@
+---
+title: "Untitled"
+output: html_document
+date: "2023-06-17"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(readr)
+library(effsize)
+# Read data
+data <- read_csv("./data/MDD_Rest1_usable_clusters_betavalues_Tha_R_8_2.csv")
+
+# Calculate the differences for paired t-test
+data <- data %>%
+  mutate(
+    vmPFC_FUS_minus_Base = vmPFC_FUS_rest_r1 - vmPFC_Base_rest_r1,
+    vmPFC_Sham_minus_Base = vmPFC_Sham_rest_r1 - vmPFC_Base_rest_r1,
+    PCC_FUS_minus_Base = PCC_FUS_rest_r1 - PCC_Base_rest_r1,
+    PCC_Sham_minus_Base = PCC_Sham_rest_r1 - PCC_Base_rest_r1
+  )
+
+# Conduct paired t-tests
+t_test_vmPFC <- t.test(data$vmPFC_FUS_minus_Base, data$vmPFC_Sham_minus_Base, paired = TRUE, na.action = na.omit)
+t_test_PCC <- t.test(data$PCC_FUS_minus_Base, data$PCC_Sham_minus_Base, paired = TRUE, na.action = na.omit)
+
+# Calculate Cohen's D
+cohen_d_vmPFC <- cohen.d(data$vmPFC_FUS_minus_Base, data$vmPFC_Sham_minus_Base, paired = TRUE, na.rm = TRUE)
+cohen_d_PCC <- cohen.d(data$PCC_FUS_minus_Base, data$PCC_Sham_minus_Base, paired = TRUE, na.rm = TRUE)
+
+# Print results
+cat("Paired t-test Results for vmPFC FUS vs Sham:\n")
+print(t_test_vmPFC)
+cat("\nCohen's D for vmPFC FUS vs Sham:\n")
+print(cohen_d_vmPFC)
+
+cat("\nPaired t-test Results for PCC FUS vs Sham:\n")
+print(t_test_PCC)
+cat("\nCohen's D for PCC FUS vs Sham:\n")
+print(cohen_d_PCC)
+
+
+# Ensure required libraries are loaded
+library(tidyverse)
+library(effsize)
+
+# Assuming you've already read the dataset as 'data'
+
+# Create the comparisons list
+comparisons <- list(
+  c("vmPFC_FUS_minus_Base", "vmPFC_Sham_minus_Base"),
+  c("PCC_FUS_minus_Base", "PCC_Sham_minus_Base")
+)
+
+# Perform paired t-tests and calculate Cohen's D
+results <- data.frame()
+
+for (comparison in comparisons) {
+  variable1 <- comparison[1]
+  variable2 <- comparison[2]
+  
+  ttest <- t.test(data[[variable1]], data[[variable2]], paired = TRUE, na.action = na.omit)
+  cohens_d <- cohen.d(data[[variable1]], data[[variable2]], paired = TRUE, na.rm = TRUE)
+  
+  result <- data.frame(
+    Comparison = paste(variable1, "vs", variable2),
+    t_value = ttest$statistic,
+    p_value = ttest$p.value,
+    cohens_d = cohens_d$estimate
+  )
+  
+  results <- rbind(results, result)
+}
+
+# Print the results
+print(results)
+
+# Create a bar plot for each comparison
+ggplot(results, aes(x = Comparison, y = cohens_d, fill = Comparison)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  theme_minimal() +
+  labs(x = "Comparison", y = "Cohen's D", fill = "Comparison") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+
+
+```
+
+#Bar plots with dots
+```{r}
+# Load necessary libraries
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+
+# Assuming you've already loaded the dataset as 'data'
+
+# Define the variables for vmPFC and PCC
+vmPFC_vars <- c("vmPFC_Base_rest_r1", "vmPFC_FUS_rest_r1", "vmPFC_Sham_rest_r1")
+PCC_vars <- c("PCC_Base_rest_r1", "PCC_FUS_rest_r1", "PCC_Sham_rest_r1")
+
+# Combine the data for calculation
+data_long <- data %>%
+  gather(key = "Condition", value = "Beta", vmPFC_vars, PCC_vars) %>%
+  mutate(
+    Region = ifelse(grepl("vmPFC", Condition), "vmPFC", "PCC"),
+    Condition = factor(gsub(".*_(.*)_rest_r1", "\\1", Condition), levels = c("Base", "FUS", "Sham")),
+    Condition = recode(Condition, "Base" = "Baseline", "FUS" = "After LIFU", "Sham" = "After Sham")
+  )
+
+# Calculate means and standard errors for plotting
+means_se <- data_long %>%
+  group_by(Region, Condition) %>%
+  summarise(
+    mean_beta = mean(Beta, na.rm = TRUE),
+    se_beta = sd(Beta, na.rm = TRUE) / sqrt(n())
+  )
+
+# Define a custom theme for classic background and remove x-axis labels
+custom_theme <- theme_classic() + 
+  theme(axis.text.x = element_blank(),  # Turn off x-axis text labels
+        axis.title.x = element_blank(),  # Turn off x-axis title
+        axis.ticks.x = element_blank(),  # Turn off x-axis ticks
+        plot.title = element_text(hjust = 0.5))
+
+# Create bar plots with standard error bars and individual data points for vmPFC
+vmPFC_plot <- ggplot(means_se %>% filter(Region == "vmPFC"), aes(x = Condition, y = mean_beta, fill = Condition)) +
+  geom_bar(stat = "identity", position = "dodge", alpha = 0.7) +
+  geom_errorbar(aes(ymin = mean_beta - se_beta, ymax = mean_beta + se_beta), width = 0.2, position = position_dodge(0.9)) +
+  geom_hline(yintercept = 0, color = "black", linetype = "solid") +  # Add black line at y=0
+  geom_jitter(data = data_long %>% filter(Region == "vmPFC"), aes(x = Condition, y = Beta), 
+              color = "black", width = 0.2, size = 2, alpha = 0.6) +  # Add individual data points
+  custom_theme +
+  labs(title = "", y = "Thalamus-vmPFC connectivity (z-value)", x = "") +
+  scale_fill_manual(values = c("Baseline" = "darkblue", "After LIFU" = "darkgreen", "After Sham" = "orange")) +
+  guides(fill = guide_legend(title = NULL))  # Remove the legend title
+
+# Save the vmPFC plot
+ggsave("./figure/thalamus_vmPFC_connectivity.png", plot = vmPFC_plot, width = 10, height = 6)
+
+# Create bar plots with standard error bars and individual data points for PCC
+PCC_plot <- ggplot(means_se %>% filter(Region == "PCC"), aes(x = Condition, y = mean_beta, fill = Condition)) +
+  geom_bar(stat = "identity", position = "dodge", alpha = 0.7) +
+  geom_errorbar(aes(ymin = mean_beta - se_beta, ymax = mean_beta + se_beta), width = 0.2, position = position_dodge(0.9)) +
+  geom_hline(yintercept = 0, color = "black", linetype = "solid") +  # Add black line at y=0
+  geom_jitter(data = data_long %>% filter(Region == "PCC"), aes(x = Condition, y = Beta), 
+              color = "black", width = 0.2, size = 2, alpha = 0.6) +  # Add individual data points
+  custom_theme +
+  labs(title = "", y = "Thalamus-PCC connectivity (z-value)", x = "") +
+  scale_fill_manual(values = c("Baseline" = "darkblue", "After LIFU" = "darkgreen", "After Sham" = "orange")) +
+  guides(fill = guide_legend(title = NULL))  # Remove the legend title
+
+# Save the PCC plot
+ggsave("./figure/thalamus_PCC_connectivity.png", plot = PCC_plot, width = 10, height = 6)
+
+
+
+```
+
+
+
+
+#Bar plots
+```{r}
+# Load necessary libraries
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+library(cowplot)  # For combining plots
+
+# Assuming you've already loaded the dataset as 'data'
+
+# Define the variables for vmPFC and PCC
+vmPFC_vars <- c("vmPFC_Base_rest_r1", "vmPFC_FUS_rest_r1", "vmPFC_Sham_rest_r1")
+PCC_vars <- c("PCC_Base_rest_r1", "PCC_FUS_rest_r1", "PCC_Sham_rest_r1")
+
+# Combine the data for calculation
+data_long <- data %>%
+  gather(key = "Condition", value = "Beta", vmPFC_vars, PCC_vars) %>%
+  mutate(
+    Region = ifelse(grepl("vmPFC", Condition), "vmPFC", "PCC"),
+    Condition = factor(gsub(".*_(.*)_rest_r1", "\\1", Condition), levels = c("Base", "FUS", "Sham")),
+    Condition = recode(Condition, "Base" = "Baseline", "FUS" = "After Active", "Sham" = "After Sham")
+  )
+
+# Calculate means and standard errors for plotting
+means_se <- data_long %>%
+  group_by(Region, Condition) %>%
+  summarise(
+    mean_beta = mean(Beta, na.rm = TRUE),
+    se_beta = sd(Beta, na.rm = TRUE) / sqrt(n())
+  )
+
+# Define a custom theme for classic background
+custom_theme <- theme_classic() + 
+  theme(plot.title = element_text(hjust = 0.5),
+        axis.text.x = element_blank(),       # Remove x-axis text labels
+        axis.ticks.x = element_blank())      # Remove x-axis ticks
+
+# Create bar plots with standard error bars for vmPFC without y-axis label and legend
+vmPFC_plot <- ggplot(means_se %>% filter(Region == "vmPFC"), aes(x = Condition, y = mean_beta, fill = Condition)) +
+  geom_bar(stat = "identity", position = "dodge", alpha = 0.7) +
+  geom_errorbar(aes(ymin = mean_beta - se_beta, ymax = mean_beta + se_beta), width = 0.2, position = position_dodge(0.9)) +
+  geom_hline(yintercept = 0, color = "black", linetype = "solid") +  # Add black line at y=0
+  custom_theme +
+  labs(title = "Thalamus-vmPFC connectivity", y = NULL, x = NULL) +
+  scale_fill_manual(values = c("Baseline" = "darkblue", "After Active" = "darkgreen", "After Sham" = "orange")) +
+  theme(legend.position = "none")  # Remove the legend
+
+# Create bar plots with standard error bars for PCC without y-axis label and with legend
+PCC_plot <- ggplot(means_se %>% filter(Region == "PCC"), aes(x = Condition, y = mean_beta, fill = Condition)) +
+  geom_bar(stat = "identity", position = "dodge", alpha = 0.7) +
+  geom_errorbar(aes(ymin = mean_beta - se_beta, ymax = mean_beta + se_beta), width = 0.2, position = position_dodge(0.9)) +
+  geom_hline(yintercept = 0, color = "black", linetype = "solid") +  # Add black line at y=0
+  custom_theme +
+  labs(title = "Thalamus-PCC connectivity", y = "z-value", x = NULL) +
+  scale_fill_manual(values = c("Baseline" = "darkblue", "After Active" = "darkgreen", "After Sham" = "orange")) +
+  guides(fill = guide_legend(title = NULL))  # Remove the "Condition" title but keep the legend
+
+# Extract the legend from the PCC plot
+legend <- get_legend(PCC_plot)
+
+# Remove the legend from the PCC plot to ensure it has the same size as the vmPFC plot
+PCC_plot <- PCC_plot + theme(legend.position = "none")
+
+# Combine the two plots into one figure with one y-axis label and one legend
+combined_plot <- plot_grid(
+ PCC_plot, vmPFC_plot, align = "v", axis = "tb", labels = NULL, ncol = 2
+)
+
+# Add the legend to the right of the combined plot
+final_plot <- plot_grid(combined_plot, legend, rel_widths = c(0.5, 0.1))
+
+# Save the final combined plot
+ggsave("./figure/combined_thalamus_connectivity.png", plot = final_plot, width = 7, height = 3)
+
+
+
+```
+
+
+
+
+#Box plots and t-test,cohen's d
+```{r}
+# Load necessary libraries
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+library(effsize)
+
+# Assuming you've already loaded the dataset as 'data'
+
+# Define the variables for vmPFC and PCC
+vmPFC_vars <- c("vmPFC_Base_rest_r1", "vmPFC_FUS_rest_r1", "vmPFC_Sham_rest_r1")
+PCC_vars <- c("PCC_Base_rest_r1", "PCC_FUS_rest_r1", "PCC_Sham_rest_r1")
+
+# Function to perform paired t-tests and calculate Cohen's D
+perform_tests <- function(data, vars) {
+  baseline <- data[[vars[1]]]
+  LIFU <- data[[vars[2]]]
+  Sham <- data[[vars[3]]]
+
+  # Paired t-tests
+  t_test_baseline_vs_LIFU <- t.test(baseline, LIFU, paired = TRUE, na.action = na.omit)
+  t_test_baseline_vs_Sham <- t.test(baseline, Sham, paired = TRUE, na.action = na.omit)
+  t_test_LIFU_vs_Sham <- t.test(LIFU, Sham, paired = TRUE, na.action = na.omit)
+
+  # Cohen's D
+  cohen_d_baseline_vs_LIFU <- cohen.d(baseline, LIFU, paired = TRUE, na.rm = TRUE)
+  cohen_d_baseline_vs_Sham <- cohen.d(baseline, Sham, paired = TRUE, na.rm = TRUE)
+  cohen_d_LIFU_vs_Sham <- cohen.d(LIFU, Sham, paired = TRUE, na.rm = TRUE)
+
+  # Combine results
+  results <- data.frame(
+    Comparison = c("Baseline vs LIFU", "Baseline vs Sham", "LIFU vs Sham"),
+    t_value = c(t_test_baseline_vs_LIFU$statistic, t_test_baseline_vs_Sham$statistic, t_test_LIFU_vs_Sham$statistic),
+    p_value = c(t_test_baseline_vs_LIFU$p.value, t_test_baseline_vs_Sham$p.value, t_test_LIFU_vs_Sham$p.value),
+    cohen_d = c(cohen_d_baseline_vs_LIFU$estimate, cohen_d_baseline_vs_Sham$estimate, cohen_d_LIFU_vs_Sham$estimate)
+  )
+
+  return(results)
+}
+
+# Perform tests for vmPFC and PCC
+vmPFC_results <- perform_tests(data, vmPFC_vars)
+PCC_results <- perform_tests(data, PCC_vars)
+
+# Print the results
+print("vmPFC Results:")
+print(vmPFC_results)
+
+print("PCC Results:")
+print(PCC_results)
+
+# Combine the data for plotting
+data_long <- data %>%
+  gather(key = "Condition", value = "Beta", vmPFC_vars, PCC_vars) %>%
+  mutate(
+    Region = ifelse(grepl("vmPFC", Condition), "vmPFC", "PCC"),
+    Condition = factor(gsub(".*_(.*)_rest_r1", "\\1", Condition), levels = c("Base", "FUS", "Sham"))
+  )
+
+# Create dot and box plots (you can also use violin plots by replacing geom_boxplot with geom_violin)
+ggplot(data_long, aes(x = Condition, y = Beta, fill = Condition)) +
+  geom_boxplot(outlier.shape = NA, alpha = 0.3) +  # Box plot with no outliers shown
+  geom_dotplot(binaxis = 'y', stackdir = 'center', dotsize = 0.8) +  # Dot plot overlay
+  facet_wrap(~Region) +  # Separate plots for vmPFC and PCC
+  theme_minimal() +
+  labs(title = "Beta Value Distribution Across Conditions", y = "Beta Value", x = "Condition") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  scale_fill_manual(values = c("Base" = "darkblue", "FUS" = "darkgreen", "Sham" = "orange"))
+
+# Optionally, save the plot
+ggsave("./figure/connectivity_value_distribution.png", width = 10, height = 6)
+
+
+
+```
+
+
+```{r}
+
+# Load necessary libraries
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+library(readr)
+library(effsize)
+# Read data
+data <- read_csv("./data/MDD_Rest1_usable_clusters_betavalues_Tha_R_8_2.csv")
+
+# Calculate the differences for paired t-test
+data <- data %>%
+  mutate(
+    vmPFC_FUS_minus_Base = vmPFC_FUS_rest_r1 - vmPFC_Base_rest_r1,
+    vmPFC_Sham_minus_Base = vmPFC_Sham_rest_r1 - vmPFC_Base_rest_r1,
+    PCC_FUS_minus_Base = PCC_FUS_rest_r1 - PCC_Base_rest_r1,
+    PCC_Sham_minus_Base = PCC_Sham_rest_r1 - PCC_Base_rest_r1
+  )
+
+# Filter out specific subjects (assuming these are MDD subjects to exclude)
+data <- data %>% filter(Group %in% c("High", "Low"))
+
+# Define the variables you're interested in for vmPFC and PCC
+variables_vmPFC <- c("vmPFC_FUS_minus_Base", "vmPFC_Sham_minus_Base")
+variables_PCC <- c("PCC_FUS_minus_Base", "PCC_Sham_minus_Base")
+
+# Define titles for each plot
+titles <- c("Connectivity Changes from Screening (vmPFC)", "Connectivity Changes from Screening (PCC)")
+
+# Define your custom color palette
+my_palette <- c("Screening" = "darkblue", "FUS" = "darkgreen", "Sham" = "orange")
+
+# Prepare the plot for each variable
+for (i in seq_along(list(variables_vmPFC, variables_PCC))) {
+  variables <- list(variables_vmPFC, variables_PCC)[[i]]
+  
+  # Subset the data
+  df_subset <- data %>% select(SID, all_of(variables))
+  
+  # Calculate means and standard errors
+  means_se <- df_subset %>% 
+    select(-SID) %>%
+    gather(key="group", value="value") %>%
+    mutate(condition = case_when(
+      grepl("FUS", group) ~ "LIFU", 
+      grepl("Sham", group) ~ "Sham",
+      grepl("Base", group) ~ "Screening"
+    )) %>%
+    group_by(group, condition) %>%
+    summarise(mean = mean(value, na.rm = TRUE),
+              se = sd(value, na.rm = TRUE) / sqrt(n()))
+  
+  # Factor ordering
+  means_se$condition <- factor(means_se$condition, levels = c("Screening", "LIFU", "Sham"))
+  
+  # Create the plot
+  p <- ggplot(means_se, aes(x=condition, y=mean, fill=condition)) +
+    geom_bar(stat="identity", position=position_dodge()) +
+    geom_errorbar(aes(ymin = mean - se, ymax = mean + se), width = 0.2) +
+    labs(title=titles[i], x="", y="Beta values") +
+    theme_minimal() +
+    scale_fill_manual(values = my_palette) +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1, color = "black"),
+          axis.text.y = element_text(color = "black"),
+          plot.title = element_text(hjust = 0.5))
+  
+  # Save the plot
+  ggsave(paste0("./figure/plot_change from screening_", i, ".png"), plot = p)
+}
+
+```
